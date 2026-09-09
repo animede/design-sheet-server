@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>キャラクターシート作成</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>マルチキャラクターシート作成</h1>
+  <span id="health" class="health">バックエンド確認中…</span>
+</header>
+
+<main>
+  <section class="panel form-panel">
+    <h2>入力</h2>
+    <label class="file-drop" id="fileDrop">
+      <input type="file" id="imageInput" accept="image/*">
+      <img id="inputPreview" alt="" hidden>
+      <span id="fileHint">キャラ画像を選択(クリック / ドロップ)</span>
+    </label>
+
+    <div class="field-row">
+      <label>シード <input type="number" id="seed" value="-1" title="-1 でランダム"></label>
+      <label class="check"><input type="checkbox" id="stylize" checked> 先にイラスト化(写真入力向け)</label>
+    </div>
+
+    <h3>ビュー</h3>
+    <div id="viewChecks" class="check-grid"></div>
+
+    <h3>変種</h3>
+    <div id="variantChecks" class="check-grid"></div>
+
+    <h3>部分彩色</h3>
+    <div class="field-col">
+      <label>対象 <input type="text" id="partialTarget"></label>
+      <label>色 <input type="text" id="partialColor"></label>
+    </div>
+
+    <h3>生成設定</h3>
+    <div class="field-col">
+      <label>シートレイアウト
+        <select id="layout">
+          <option value="a4">A4横・印刷向け(既定)</option>
+          <option value="grid">グリッド(横長・画面確認向け)</option>
+        </select>
+      </label>
+      <label>主役パネル(大判、A4のみ)
+        <select id="heroVariant">
+          <option value="lineart">線画(既定)</option>
+          <option value="color">彩色</option>
+          <option value="partial">部分彩色</option>
+          <option value="none">なし</option>
+        </select>
+      </label>
+      <label>主役ビュー <select id="heroView"></select></label>
+      <label>量子化
+        <select id="quant">
+          <option value="">サーバ現状のまま(既定)</option>
+          <option value="gguf-q4_k_m">GGUF Q4_K_M(軽量・24GB級)</option>
+          <option value="fp8-lightning">fp8-lightning(高品質・48GB級以上)</option>
+        </select>
+      </label>
+    </div>
+
+    <button id="startBtn" disabled>シートを生成</button>
+    <div id="formError" class="error" hidden></div>
+  </section>
+
+  <section class="panel result-panel">
+    <h2>結果 <span id="jobStatus" class="status-badge"></span></h2>
+    <div id="progressLine" class="progress-line"></div>
+    <div id="cellGrid" class="cell-grid"></div>
+    <div id="sheetArea" hidden>
+      <h3>合成シート</h3>
+      <img id="sheetImg" class="sheet-preview" alt="sheet">
+      <p>
+        <a id="sheetLink" download>sheet.png をダウンロード</a> /
+        <a id="zipLink" download>全画像ZIP</a>
+      </p>
+      <p>
+        <button id="recomposeBtn" class="secondary">フォームの設定で再配置(生成なし・数秒)</button>
+        <span id="recomposeMsg" class="muted"></span>
+      </p>
+    </div>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
