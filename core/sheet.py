@@ -82,6 +82,8 @@ def compose_mode_sheet(
 
     サイズは画像の再生成解像度ではなく、シート上のキャラクター表示倍率を表す。
     同一ビューを小・中・大で置くので、アイコンから立ち絵までの見え方を1枚で確認できる。
+    a4(既定)ではサイズ違いを横一列でなくブロック内2×2に配置し、
+    サイズ差で生まれる空白を抑える(ポーズ数だけ2×2ブロックが並ぶ)。
     """
     ratios = {"small": 0.48, "medium": 0.72, "large": 1.0}
     sizes = [s for s in sizes if s in ratios]
@@ -106,7 +108,8 @@ def compose_mode_sheet(
             rows_try = math.ceil(len(views) / cols_try)
             gw = (body_w - gap * (cols_try - 1)) / cols_try
             gh = (body_h - gap * (rows_try - 1)) / rows_try
-            score = min(gw, gh * 1.55)
+            # ブロック内は2×2配置なのでほぼ正方のブロックが最も無駄が少ない
+            score = min(gw, gh)
             if best is None or score > best[0]:
                 best = (score, cols_try, rows_try, gw, gh)
         _, cols, rows, group_w, group_h = best
@@ -139,9 +142,32 @@ def compose_mode_sheet(
 
         content_top = gy + 58
         content_h = max(40, group_h - 72)
+        path = os.path.join(job_dir, f"{view}_{mode}.png")
+        if layout != "grid":
+            # サイズ違いをブロック内2×2に配置(横一列より空白が少ない)
+            usable_w = group_w - 28
+            cell_w = (usable_w - inner_gap) / 2
+            cell_h = (content_h - inner_gap) / 2
+            side_max = max(20, int(min(cell_w, cell_h - label_h)))
+            max_ratio = max(ratios[s] for s in sizes)
+            for si, s in enumerate(sizes):
+                r, c = divmod(si, 2)
+                cx = gx + 14 + int(c * (cell_w + inner_gap))
+                cy = int(content_top + r * (cell_h + inner_gap))
+                side = max(20, int(side_max * ratios[s] / max_ratio))
+                # セル内で中央寄せ・下端揃えにしてサイズ差を見せる
+                px = cx + int((cell_w - side) // 2)
+                py = cy + int(cell_h - label_h - side)
+                if os.path.exists(path):
+                    canvas.paste(_fit_panel(Image.open(path), side, side), (px, py))
+                d.rectangle([px, py, px + side, py + side], outline=(225, 225, 225), width=1)
+                slabel = SIZE_LABEL_BY_KEY.get(s, s)
+                tw = d.textlength(slabel, font=f_label)
+                d.text((cx + (cell_w - tw) / 2, cy + cell_h - label_h + 4),
+                       slabel, fill=(135, 135, 135), font=f_label)
+            continue
         usable_w = group_w - 28 - inner_gap * (len(sizes) - 1)
         x = gx + 14
-        path = os.path.join(job_dir, f"{view}_{mode}.png")
         for s in sizes:
             slot_w = max(20, int(usable_w * ratios[s] / total_ratio))
             # キャラクター自体の寸法を段階的に変え、各スロットの下端で揃える。
