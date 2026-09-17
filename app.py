@@ -230,6 +230,11 @@ async def recompose(
     return {"ok": True, **result}
 
 
+@app.get("/api/sheet/jobs")
+async def job_list():
+    return {"jobs": jobs.list_jobs()}
+
+
 @app.get("/api/sheet/jobs/{job_id}")
 async def job_status(job_id: str):
     _check_job_id(job_id)

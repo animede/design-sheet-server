@@ -66,6 +66,32 @@ def _set_cell(job_id: str, view: str, variant: str, status: str):
         _persist(job)
 
 
+def list_jobs(limit: int = 20):
+    """outputs/ にある過去ジョブの一覧(新しい順)。再起動後の履歴表示用。"""
+    entries = []
+    if not os.path.isdir(config.OUTPUTS_DIR):
+        return entries
+    for name in os.listdir(config.OUTPUTS_DIR):
+        path = os.path.join(config.OUTPUTS_DIR, name, "job.json")
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                job = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        entries.append({
+            "job_id": job.get("job_id", name),
+            "status": job.get("status"),
+            "sheet_ready": bool(job.get("sheet_ready")),
+            "mode": (job.get("params") or {}).get("mode"),
+            "started_at": job.get("started_at"),
+            "mtime": os.path.getmtime(path),
+        })
+    entries.sort(key=lambda e: e["mtime"], reverse=True)
+    return entries[:limit]
+
+
 def get_job(job_id: str):
     with _jobs_lock:
         job = _jobs.get(job_id)

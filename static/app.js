@@ -42,6 +42,51 @@ async function init() {
 
   checkHealth();
   setInterval(checkHealth, 15000);
+  loadHistory();
+}
+
+// 過去ジョブの一覧(再起動・リロード後も生成済みシートへ辿り着けるように)
+async function loadHistory() {
+  const list = $("historyList");
+  try {
+    const body = await (await fetch("/api/sheet/jobs")).json();
+    const jobs = (body.jobs || []).filter((j) => j.sheet_ready);
+    if (!jobs.length) {
+      list.innerHTML = '<li class="muted">まだありません</li>';
+      return;
+    }
+    const modeLabel = Object.fromEntries((META?.modes || []).map((m) => [m.key, m.label]));
+    list.innerHTML = jobs.map((j) => {
+      const when = j.started_at ? new Date(j.started_at * 1000).toLocaleString("ja-JP") : j.job_id;
+      return `<li>
+        <a href="#" class="history-open" data-job="${j.job_id}">${when}</a>
+        <span class="muted">${modeLabel[j.mode] || j.mode || ""}</span>
+        <a href="/api/sheet/jobs/${j.job_id}/sheet.png" download>sheet.png</a>
+        <a href="/api/sheet/jobs/${j.job_id}/download.zip" download>ZIP</a>
+      </li>`;
+    }).join("");
+    list.querySelectorAll(".history-open").forEach((a) =>
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        openJob(a.dataset.job);
+      })
+    );
+  } catch (e) {
+    list.innerHTML = '<li class="muted">履歴の取得に失敗しました</li>';
+  }
+}
+
+// 過去ジョブを結果パネルへ復元表示する
+async function openJob(jobId) {
+  const job = await (await fetch(`/api/sheet/jobs/${jobId}`)).json();
+  if (!job || !job.views) return;
+  currentJobId = jobId;
+  const views = Object.keys(job.views);
+  const variants = views.length ? Object.keys(job.views[views[0]]) : [];
+  loadedImages.clear();
+  buildCellGrid(views, variants);
+  $("sheetArea").hidden = true;
+  await poll();
 }
 
 // ドラッグ&ドロップ(エリア上のハイライト + ドロップで画像を選択)

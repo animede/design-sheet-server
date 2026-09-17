@@ -107,3 +107,9 @@ button.secondary {
 
 .sheet-preview { max-width: 100%; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
 a { color: var(--accent); }
+
+/* 生成済みシート履歴 */
+.history-list { list-style: none; padding: 0; margin: 4px 0 0; }
+.history-list li { padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.history-list li:last-child { border-bottom: none; }
+.history-list a { margin-right: 10px; }
