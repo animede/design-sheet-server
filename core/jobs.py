@@ -157,11 +157,9 @@ def start_job(image_bytes: bytes, params: dict):
     return job_id
 
 
-def _run_mode_steps(job_id: str, job_dir: str, params: dict):
-    """表現モード版パイプライン。例外処理と実行枠の解放は _run_job が担う。"""
+def _generate_mode_views(job_id: str, job_dir: str, params: dict, mode: str):
+    """1つの表現モードの styling→views→finishing を実行し {view}_{mode}.png を作る。"""
     views = params["views"]
-    mode = params["mode"]
-    sizes = params.get("sizes") or ["small", "medium", "large"]
     seed = params["seed"]
     quant = params.get("quant") or config.DEFAULT_QUANT or None
     lightning = params.get("lightning", True)
@@ -176,7 +174,7 @@ def _run_mode_steps(job_id: str, job_dir: str, params: dict):
         base_bytes, build_mode_prompt(mode), seed, width=w, height=h,
         quant=quant, lightning=lightning,
     )
-    with open(os.path.join(job_dir, "prepared.png"), "wb") as f:
+    with open(os.path.join(job_dir, f"prepared_{mode}.png"), "wb") as f:
         f.write(base_bytes)
     _update(job_id, stylized=True)
 
@@ -238,12 +236,41 @@ def _run_mode_steps(job_id: str, job_dir: str, params: dict):
                 _set_cell(job_id, view, mode, "error")
                 _record_cell_error(job_id, f"{view}/{mode}", str(exc))
 
-    # 4. 同じビューを選択された表示倍率で並べる。
+
+def _run_mode_steps(job_id: str, job_dir: str, params: dict):
+    """表現モード版パイプライン。例外処理と実行枠の解放は _run_job が担う。"""
+    mode = params["mode"]
+    sizes = params.get("sizes") or ["small", "medium", "large"]
+    _generate_mode_views(job_id, job_dir, params, mode)
     _update(job_id, status="composing")
-    title = f"Character Design Sheet — seed={seed}  ({time.strftime('%Y-%m-%d %H:%M')})"
+    title = (f"Character Design Sheet — seed={params['seed']}  "
+             f"({time.strftime('%Y-%m-%d %H:%M')})")
     sheet.compose_mode_sheet(
-        job_dir, title, views, mode, sizes, layout=params.get("layout", "a4")
+        job_dir, title, params["views"], mode, sizes, layout=params.get("layout", "a4")
     )
+    _build_zip(job_dir)
+    _update(job_id, status="done", sheet_ready=True, finished_at=time.time())
+
+
+def _run_mix_steps(job_id: str, job_dir: str, params: dict):
+    """MIX版パイプライン: 選択された複数の表現モードを順に生成し、
+    「左=入力+主役大判、右=多視点×表現」のシートに合成する。"""
+    modes = params["variants"]
+    for m in modes:
+        try:
+            _generate_mode_views(job_id, job_dir, params, m)
+        except client.ImageServerError as exc:
+            # この表現の生成失敗は記録して次の表現へ進む
+            for v in params["views"]:
+                _set_cell(job_id, v, m, "error")
+            _record_cell_error(job_id, f"*/{m}", str(exc))
+    _update(job_id, status="composing")
+    title = (f"Character Design Sheet — seed={params['seed']}  "
+             f"({time.strftime('%Y-%m-%d %H:%M')})")
+    sheet.compose_sheet(job_dir, title, params["views"], modes, include_input=True,
+                        layout=params.get("layout", "a4"),
+                        hero_view=params.get("hero_view"),
+                        hero_variant=params.get("hero_variant"))
     _build_zip(job_dir)
     _update(job_id, status="done", sheet_ready=True, finished_at=time.time())
 
@@ -259,6 +286,9 @@ def _run_job(job_id: str):
     lightning = params.get("lightning", True)
 
     try:
+        if params.get("mix"):
+            _run_mix_steps(job_id, job_dir, params)
+            return
         if params.get("mode"):
             _run_mode_steps(job_id, job_dir, params)
             return
@@ -408,8 +438,17 @@ def recompose_job(job_id: str, views, variants, layout, hero_view, hero_variant,
             return {"sheet_rev": target["sheet_rev"], "views": avail,
                     "skipped_views": skipped}
 
-    validate_params(views, variants)
-    check = list(dict.fromkeys(list(variants) + ["color"]))
+    if (job.get("params") or {}).get("mix"):
+        bad = [v for v in variants if v not in MODE_KEYS]
+        if bad or not variants:
+            raise ValueError(f"未知の表現です: {bad}(有効: {MODE_KEYS})")
+        bad_views = [v for v in views if v not in VIEW_KEYS]
+        if bad_views or not views:
+            raise ValueError(f"ビュー指定が不正です: {bad_views}")
+        check = list(variants)
+    else:
+        validate_params(views, variants)
+        check = list(dict.fromkeys(list(variants) + ["color"]))
     avail = [v for v in views
              if any(os.path.exists(os.path.join(job_dir, f"{v}_{var}.png")) for var in check)]
     skipped = [v for v in views if v not in avail]

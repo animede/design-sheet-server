@@ -119,6 +119,9 @@ async def generate(
     if layout not in ("a4", "grid"):
         raise HTTPException(status_code=400, detail="layout は a4 / grid のいずれかを指定してください。")
     mode = mode.strip().lower()
+    mix = mode == "mix"
+    if mix:
+        mode = ""
     size_list = list(dict.fromkeys(s.strip().lower() for s in sizes.split(",") if s.strip()))
     if mode:
         if mode not in MODE_KEYS:
@@ -129,16 +132,24 @@ async def generate(
 
     hero_variant = hero_variant.strip().lower()
     hero_view = hero_view.strip().lower()
+    hero_keys = [k for k, _ in VARIANT_LABELS] + MODE_KEYS
     if hero_variant in ("", "none"):
         hero_variant = None
-    elif hero_variant not in [k for k, _ in VARIANT_LABELS]:
-        raise HTTPException(status_code=400, detail="hero_variant は none / color / lineart / partial のいずれかを指定してください。")
+    elif hero_variant not in hero_keys:
+        raise HTTPException(status_code=400, detail=f"hero_variant は none または {hero_keys} から指定してください。")
     if hero_variant and hero_view not in [k for k, _ in VIEW_LABELS]:
         raise HTTPException(status_code=400, detail="hero_view が不正です。")
     view_list = [v.strip() for v in views.split(",") if v.strip()]
     variant_list = [v.strip() for v in variants.split(",") if v.strip()]
     try:
-        if mode:
+        if mix:
+            bad = [v for v in variant_list if v not in MODE_KEYS]
+            if bad or not variant_list:
+                raise ValueError(f"MIXする表現は {MODE_KEYS} から1つ以上選択してください: {bad}")
+            bad_views = [v for v in view_list if v not in jobs.VIEW_KEYS]
+            if bad_views or not view_list:
+                raise ValueError(f"ビューを1つ以上正しく選択してください: {bad_views}")
+        elif mode:
             jobs.validate_mode_params(view_list, mode, size_list)
         else:
             jobs.validate_params(view_list, variant_list)
@@ -171,6 +182,7 @@ async def generate(
         "hero_variant": hero_variant,
         "hero_view": hero_view,
         "mode": mode or None,
+        "mix": mix,
         "sizes": size_list,
     }
     try:
@@ -207,7 +219,7 @@ async def recompose(
         hv = p.get("hero_variant")
     elif hv == "none":
         hv = None
-    elif hv not in [k for k, _ in VARIANT_LABELS]:
+    elif hv not in [k for k, _ in VARIANT_LABELS] + MODE_KEYS:
         raise HTTPException(status_code=400, detail="hero_variant が不正です。")
     hview = hero_view.strip().lower() or p.get("hero_view") or "front"
     if hv and hview not in [k for k, _ in VIEW_LABELS]:

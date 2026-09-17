@@ -22,6 +22,9 @@ from core.prompts import (
     VIEW_LABEL_BY_KEY,
 )
 
+# 変種キーと表現モードキーの両方をラベル解決できる辞書(MIXシート対応)
+_LABEL_BY_KEY = {**MODE_LABEL_BY_KEY, **VARIANT_LABEL_BY_KEY}
+
 # A4横 300dpi
 A4_W, A4_H = 3508, 2480
 A4_MARGIN = 118          # 10mm(プリンタの非印字領域を考慮した白フチ)
@@ -239,7 +242,7 @@ def compose_sheet_a4(
     def draw_block(bx, y0, block_views, panel):
         """1ブロック分(列ヘッダ+行ラベル+セル)を描画する。"""
         for ci, variant in enumerate(variants):
-            label = VARIANT_LABEL_BY_KEY.get(variant, variant)
+            label = _LABEL_BY_KEY.get(variant, variant)
             cx = bx + A4_ROW_LABEL_W + ci * (panel + A4_GUT)
             tw = d.textlength(label, font=f_label)
             d.text((cx + (panel - tw) / 2, y0), label, fill=(90, 90, 90), font=f_label)
@@ -281,7 +284,7 @@ def compose_sheet_a4(
             _draw_tight(input_path, body_top, "入力(元画像)")
         hy = body_top + cell_h + cap_h + 2 * A4_GUT
         hero_label = (f"主役: {VIEW_LABEL_BY_KEY.get(hero_view, hero_view)} / "
-                      f"{VARIANT_LABEL_BY_KEY.get(hero_variant, hero_variant)}")
+                      f"{_LABEL_BY_KEY.get(hero_variant, hero_variant)}")
         _draw_tight(hero_path, hy, hero_label)
 
         # --- 右カラム: 残り幅全体で1〜2ブロックを最適化して大きく配置 ---
@@ -311,7 +314,7 @@ def compose_sheet_a4(
             bx = x0 + bi * (block_w + A4_BLOCK_GAP)
             block_views = views[bi * rows:(bi + 1) * rows]
             for ci, variant in enumerate(variants):
-                label = VARIANT_LABEL_BY_KEY.get(variant, variant)
+                label = _LABEL_BY_KEY.get(variant, variant)
                 cx = bx + ci * (panel + A4_GUT)
                 tw = d.textlength(label, font=f_label)
                 d.text((cx + (panel - tw) / 2, y0), label, fill=(90, 90, 90), font=f_label)
@@ -415,7 +418,7 @@ def compose_sheet(
     # 行ラベル + セル
     for ri, variant in enumerate(rows):
         cy = y0 + ri * (ph + gut)
-        vlabel = VARIANT_LABEL_BY_KEY.get(variant, variant)
+        vlabel = _LABEL_BY_KEY.get(variant, variant)
         d.text((margin, cy + ph / 2 - 15), vlabel, fill=(70, 70, 70), font=f_label)
         for ci, col in enumerate(cols):
             cx = x0 + ci * (pw + gut)

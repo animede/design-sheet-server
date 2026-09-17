@@ -30,12 +30,13 @@ async function init() {
     `<label class="mode-choice"><input type="radio" name="mode" value="${m.key}" ${m.key === META.defaults.mode ? "checked" : ""}><span>${m.label}</span></label>`
   ).join("") +
     '<label class="mode-choice"><input type="radio" name="mode" value="mix"><span>MIX(変種一覧)</span></label>';
-  const defaultVariants = new Set(["color", "lineart", "partial"]);
-  $("variantChecks").innerHTML = META.variants.map((v) =>
-    `<label><input type="checkbox" name="variant" value="${v.key}" ${defaultVariants.has(v.key) ? "checked" : ""}> ${v.label}</label>`
+  // MIXは表現モード(リアル/アニメ/イラスト/ちびキャラ…)から複数選ぶ
+  const defaultVariants = new Set(["real", "anime", "illustration", "chibi"]);
+  $("variantChecks").innerHTML = META.modes.map((m) =>
+    `<label><input type="checkbox" name="variant" value="${m.key}" ${defaultVariants.has(m.key) ? "checked" : ""}> ${m.label}</label>`
   ).join("");
-  $("heroVariant").innerHTML = META.variants.map((v) =>
-    `<option value="${v.key}" ${v.key === "lineart" ? "selected" : ""}>${v.label}</option>`
+  $("heroVariant").innerHTML = META.modes.map((m) =>
+    `<option value="${m.key}" ${m.key === "illustration" ? "selected" : ""}>${m.label}</option>`
   ).join("") + '<option value="none">なし(グリッドのみ)</option>';
   const defaultSizes = new Set(META.defaults.sizes);
   $("sizeChecks").innerHTML = META.sizes.map((s) =>
@@ -221,6 +222,7 @@ async function startJob() {
   fd.append("seed", $("seed").value || "-1");
   fd.append("views", views.join(","));
   if (isMix) {
+    fd.append("mode", "mix");
     fd.append("variants", variants.join(","));
     fd.append("hero_variant", $("heroVariant").value);
     fd.append("hero_view", "front");
