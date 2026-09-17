@@ -43,12 +43,31 @@ def _check_job_id(job_id: str):
         raise HTTPException(status_code=404, detail="不正なジョブIDです")
 
 
+def _image_response(content: bytes, media_type: str):
+    from fastapi.responses import Response
+    return Response(content=content, media_type=media_type)
+
+
 @app.get("/api/fetch-image")
 async def fetch_image(url: str):
     """他タブからD&Dされた画像URLの取り込み(CORS回避のローカル専用プロキシ)。"""
     from urllib.parse import urlparse
 
+    from urllib.parse import unquote
+
     parsed = urlparse(url)
+    if parsed.scheme == "file":
+        # ファイルマネージャからのD&Dは file:/// のURLだけ渡ることがある
+        path = unquote(parsed.path)
+        if not os.path.isfile(path):
+            raise HTTPException(status_code=404, detail=f"ファイルが見つかりません: {path}")
+        try:
+            with Image.open(path) as im:
+                fmt = (im.format or "").lower()
+        except Exception:
+            raise HTTPException(status_code=415, detail="画像ではありません")
+        with open(path, "rb") as f:
+            return _image_response(f.read(), f"image/{'jpeg' if fmt == 'jpeg' else fmt or 'png'}")
     if parsed.scheme not in ("http", "https") or parsed.hostname not in (
         "localhost", "127.0.0.1", "::1",
     ):
@@ -64,8 +83,7 @@ async def fetch_image(url: str):
     ctype = resp.headers.get("content-type", "")
     if not ctype.startswith("image/"):
         raise HTTPException(status_code=415, detail="画像ではありません")
-    from fastapi.responses import Response
-    return Response(content=resp.content, media_type=ctype)
+    return _image_response(resp.content, ctype)
 
 
 @app.get("/api/meta")

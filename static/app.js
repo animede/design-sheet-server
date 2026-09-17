@@ -120,21 +120,35 @@ function setupDragDrop() {
     })
   );
   drop.addEventListener("drop", async (e) => {
-    const f = [...(e.dataTransfer?.files || [])].find((f) => f.type.startsWith("image/"));
+    // MIMEタイプが空で渡るファイルマネージャがあるため拡張子でも判定する
+    const isImageFile = (f) => f.type.startsWith("image/") ||
+      (!f.type && /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name));
+    const f = [...(e.dataTransfer?.files || [])].find(isImageFile);
     if (f) return setInputFile(f);
-    // 他タブの画像をドラッグした場合は File が無く URL だけ来る
+    // 他タブの画像や一部のファイルマネージャは File が無く URL だけ来る
     const url = (e.dataTransfer?.getData("text/uri-list") || e.dataTransfer?.getData("text/plain") || "").split("\n")[0].trim();
-    if (!url) return;
+    if (!url) {
+      $("fileHint").textContent = "ドロップから画像を取り出せませんでした。クリックで選択してください。";
+      return;
+    }
     $("fileHint").textContent = "画像を取得中…";
     try {
-      let resp;
-      try {
-        resp = await fetch(url, { mode: "cors" });
-        if (!resp.ok) throw new Error(resp.status);
-      } catch (_) {
-        // 他オリジン(別ポートのアプリ)はCORSで弾かれるためサーバ経由で取得
+      let resp = null;
+      if (!url.startsWith("file:")) {
+        try {
+          resp = await fetch(url, { mode: "cors" });
+          if (!resp.ok) throw new Error(resp.status);
+        } catch (_) {
+          resp = null;
+        }
+      }
+      if (!resp) {
+        // file:// や他オリジン(別ポート)はサーバ経由で取得
         resp = await fetch(`/api/fetch-image?url=${encodeURIComponent(url)}`);
-        if (!resp.ok) throw new Error(resp.status);
+        if (!resp.ok) {
+          const detail = (await resp.json().catch(() => null))?.detail;
+          throw new Error(detail || resp.status);
+        }
       }
       const blob = await resp.blob();
       if (!blob.type.startsWith("image/")) throw new Error("画像ではありません");
@@ -142,7 +156,7 @@ function setupDragDrop() {
         : (decodeURIComponent(url.split("/").pop().split("?")[0]) || "dropped.png");
       setInputFile(new File([blob], name, { type: blob.type }));
     } catch (err) {
-      $("fileHint").textContent = "この画像は直接取り込めませんでした。保存してから選択してください。";
+      $("fileHint").textContent = `取り込めませんでした(${err.message})。クリックで選択してください。`;
     }
   });
 }
