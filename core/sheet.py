@@ -144,14 +144,18 @@ def compose_mode_sheet(
         content_h = max(40, group_h - 72)
         path = os.path.join(job_dir, f"{view}_{mode}.png")
         if layout != "grid":
-            # サイズ違いをブロック内2×2に配置(横一列より空白が少ない)
+            # サイズ違いをブロック内2×2に配置(横一列より空白が少ない)。
+            # 1サイズなら分割せず全面、2サイズなら横並びにして大きく見せる。
+            n = len(sizes)
+            gcols = 1 if n == 1 else 2
+            grows = 1 if n <= 2 else 2
             usable_w = group_w - 28
-            cell_w = (usable_w - inner_gap) / 2
-            cell_h = (content_h - inner_gap) / 2
+            cell_w = (usable_w - inner_gap * (gcols - 1)) / gcols
+            cell_h = (content_h - inner_gap * (grows - 1)) / grows
             side_max = max(20, int(min(cell_w, cell_h - label_h)))
             max_ratio = max(ratios[s] for s in sizes)
             for si, s in enumerate(sizes):
-                r, c = divmod(si, 2)
+                r, c = divmod(si, gcols)
                 cx = gx + 14 + int(c * (cell_w + inner_gap))
                 cy = int(content_top + r * (cell_h + inner_gap))
                 side = max(20, int(side_max * ratios[s] / max_ratio))
