@@ -32,9 +32,22 @@
     <h3>ビュー</h3>
     <div id="viewChecks" class="check-grid"></div>
 
-    <h3>シート内の表示サイズ</h3>
-    <p class="field-help">選んだサイズを各ビューに並べます</p>
-    <div id="sizeChecks" class="size-grid"></div>
+    <div id="sizeSection">
+      <h3>シート内の表示サイズ</h3>
+      <p class="field-help">選んだサイズを各ビューに並べます</p>
+      <div id="sizeChecks" class="size-grid"></div>
+    </div>
+
+    <div id="mixSettings" hidden>
+      <h3>MIXする変種</h3>
+      <p class="field-help">左に入力と主役の大判、右に多視点×変種のグリッドを配置します</p>
+      <div id="variantChecks" class="check-grid"></div>
+      <div class="field-row">
+        <label>主役(左下の大判)
+          <select id="heroVariant"></select>
+        </label>
+      </div>
+    </div>
 
     <div id="partialSettings" hidden>
       <h3>部分彩色</h3>

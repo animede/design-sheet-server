@@ -28,14 +28,22 @@ async function init() {
   ).join("");
   $("modeChoices").innerHTML = META.modes.map((m) =>
     `<label class="mode-choice"><input type="radio" name="mode" value="${m.key}" ${m.key === META.defaults.mode ? "checked" : ""}><span>${m.label}</span></label>`
+  ).join("") +
+    '<label class="mode-choice"><input type="radio" name="mode" value="mix"><span>MIX(変種一覧)</span></label>';
+  const defaultVariants = new Set(["color", "lineart", "partial"]);
+  $("variantChecks").innerHTML = META.variants.map((v) =>
+    `<label><input type="checkbox" name="variant" value="${v.key}" ${defaultVariants.has(v.key) ? "checked" : ""}> ${v.label}</label>`
   ).join("");
+  $("heroVariant").innerHTML = META.variants.map((v) =>
+    `<option value="${v.key}" ${v.key === "lineart" ? "selected" : ""}>${v.label}</option>`
+  ).join("") + '<option value="none">なし(グリッドのみ)</option>';
   const defaultSizes = new Set(META.defaults.sizes);
   $("sizeChecks").innerHTML = META.sizes.map((s) =>
     `<label><input type="checkbox" name="size" value="${s.key}" ${defaultSizes.has(s.key) ? "checked" : ""}> ${s.label}</label>`
   ).join("");
   $("partialTarget").value = META.defaults.partial_target;
   $("partialColor").value = META.defaults.partial_color;
-  document.querySelectorAll('input[name="mode"]').forEach((el) =>
+  document.querySelectorAll('input[name="mode"], input[name="variant"]').forEach((el) =>
     el.addEventListener("change", updateModeSettings)
   );
   updateModeSettings();
@@ -181,7 +189,10 @@ function selectedMode() {
 }
 
 function updateModeSettings() {
-  $("partialSettings").hidden = selectedMode() !== "partial";
+  const mode = selectedMode();
+  $("partialSettings").hidden = mode !== "partial" && !(mode === "mix" && selectedValues("variant").includes("partial"));
+  $("mixSettings").hidden = mode !== "mix";
+  $("sizeSection").hidden = mode === "mix";
 }
 
 async function startJob() {
@@ -189,11 +200,18 @@ async function startJob() {
   if (!f) return;
   const views = selectedValues("view");
   const mode = selectedMode();
+  const isMix = mode === "mix";
   const sizes = selectedValues("size");
+  const variants = selectedValues("variant");
   const err = $("formError");
   err.hidden = true;
-  if (!views.length || !sizes.length) {
+  if (!views.length || (!isMix && !sizes.length)) {
     err.textContent = "ビューと表示サイズを1つ以上選択してください。";
+    err.hidden = false;
+    return;
+  }
+  if (isMix && !variants.length) {
+    err.textContent = "MIXする変種を1つ以上選択してください。";
     err.hidden = false;
     return;
   }
@@ -202,8 +220,14 @@ async function startJob() {
   fd.append("image", f);
   fd.append("seed", $("seed").value || "-1");
   fd.append("views", views.join(","));
-  fd.append("mode", mode);
-  fd.append("sizes", sizes.join(","));
+  if (isMix) {
+    fd.append("variants", variants.join(","));
+    fd.append("hero_variant", $("heroVariant").value);
+    fd.append("hero_view", "front");
+  } else {
+    fd.append("mode", mode);
+    fd.append("sizes", sizes.join(","));
+  }
   fd.append("partial_target", $("partialTarget").value);
   fd.append("partial_color", $("partialColor").value);
   fd.append("quant", $("quant").value);
@@ -215,7 +239,7 @@ async function startJob() {
     const body = await resp.json();
     if (!resp.ok) throw new Error(body.detail || resp.status);
     currentJobId = body.job_id;
-    buildCellGrid(views, [mode]);
+    buildCellGrid(views, isMix ? variants : [mode]);
     $("sheetArea").hidden = true;
     loadedImages.clear();
     pollTimer = setInterval(poll, 1500);
