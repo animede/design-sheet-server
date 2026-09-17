@@ -20,6 +20,7 @@ header {
 h1 { font-size: 18px; margin: 0; }
 h2 { font-size: 15px; margin: 0 0 12px; }
 h3 { font-size: 13px; margin: 16px 0 6px; color: var(--muted); }
+.field-help { margin: -2px 0 8px; color: var(--muted); font-size: 11px; }
 .health { font-size: 12px; color: var(--muted); }
 .health.ok { color: var(--ok); }
 .health.err { color: var(--err); }
@@ -54,6 +55,22 @@ input[type="number"] { width: 90px; }
 .check { display: inline-flex; gap: 6px; align-items: center; }
 .check-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
 .check-grid label { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+.mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.mode-choice { position: relative; cursor: pointer; }
+.mode-choice input { position: absolute; opacity: 0; pointer-events: none; }
+.mode-choice span {
+  display: block; padding: 10px 8px; border: 1px solid var(--border); border-radius: 8px;
+  text-align: center; color: var(--muted); background: var(--bg); transition: 0.15s ease;
+}
+.mode-choice input:checked + span {
+  border-color: var(--accent); color: #fff; background: rgba(91, 141, 239, 0.18);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.size-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.size-grid label {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg);
+}
 
 button {
   margin-top: 18px; width: 100%; padding: 10px; border: 0; border-radius: 8px;

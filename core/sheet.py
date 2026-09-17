@@ -15,7 +15,12 @@ import os
 from PIL import Image, ImageDraw, ImageFont
 
 from core import config
-from core.prompts import VARIANT_LABEL_BY_KEY, VIEW_LABEL_BY_KEY
+from core.prompts import (
+    MODE_LABEL_BY_KEY,
+    SIZE_LABEL_BY_KEY,
+    VARIANT_LABEL_BY_KEY,
+    VIEW_LABEL_BY_KEY,
+)
 
 # A4横 300dpi
 A4_W, A4_H = 3508, 2480
@@ -63,6 +68,103 @@ def _draw_panel(sheet, d, path, x, y, pw, ph, strong_border=True):
     else:
         d.rectangle([x - 1, y - 1, x + pw, y + ph], outline=(235, 235, 235), width=1)
         d.text((x + pw / 2 - 6, y + ph / 2 - 15), "-", fill=(200, 200, 200))
+
+
+def compose_mode_sheet(
+    job_dir: str,
+    title: str,
+    views: list,
+    mode: str,
+    sizes: list,
+    layout: str = "a4",
+) -> str:
+    """1つの表現モードを、多視点 × 表示サイズでまとめた設定シートを作る。
+
+    サイズは画像の再生成解像度ではなく、シート上のキャラクター表示倍率を表す。
+    同一ビューを小・中・大で置くので、アイコンから立ち絵までの見え方を1枚で確認できる。
+    """
+    ratios = {"small": 0.48, "medium": 0.72, "large": 1.0}
+    sizes = [s for s in sizes if s in ratios]
+    if not sizes:
+        sizes = ["large"]
+
+    if layout == "grid":
+        cols = min(3, max(1, len(views)))
+        rows = math.ceil(len(views) / cols)
+        W = 2100
+        margin, gap, header_h = 60, 26, 150
+        group_w = (W - margin * 2 - gap * (cols - 1)) // cols
+        group_h = 560
+        H = margin * 2 + header_h + rows * group_h + (rows - 1) * gap
+    else:
+        W, H = A4_W, A4_H
+        margin, gap, header_h = A4_MARGIN, 28, 230
+        body_w = W - margin * 2
+        body_h = H - margin * 2 - header_h
+        best = None
+        for cols_try in range(1, min(4, len(views)) + 1):
+            rows_try = math.ceil(len(views) / cols_try)
+            gw = (body_w - gap * (cols_try - 1)) / cols_try
+            gh = (body_h - gap * (rows_try - 1)) / rows_try
+            score = min(gw, gh * 1.55)
+            if best is None or score > best[0]:
+                best = (score, cols_try, rows_try, gw, gh)
+        _, cols, rows, group_w, group_h = best
+        group_w, group_h = int(group_w), int(group_h)
+
+    canvas = Image.new("RGB", (W, H), "white")
+    d = ImageDraw.Draw(canvas)
+    f_title = _load_font(58 if layout != "grid" else 42)
+    f_sub = _load_font(31 if layout != "grid" else 25)
+    f_label = _load_font(28 if layout != "grid" else 23)
+    d.text((margin, margin), title, fill=(35, 35, 35), font=f_title)
+    mode_label = MODE_LABEL_BY_KEY.get(mode, mode)
+    size_text = "・".join(SIZE_LABEL_BY_KEY.get(s, s) for s in sizes)
+    d.text((margin, margin + 82), f"表現: {mode_label}    サイズ: {size_text}",
+           fill=(110, 110, 110), font=f_sub)
+
+    total_ratio = sum(ratios[s] for s in sizes)
+    inner_gap = 10
+    label_h = 42
+    for i, view in enumerate(views):
+        row, col = divmod(i, cols)
+        gx = int(margin + col * (group_w + gap))
+        gy = int(margin + header_h + row * (group_h + gap))
+        d.rounded_rectangle(
+            [gx, gy, gx + group_w, gy + group_h], radius=16,
+            fill=(250, 250, 250), outline=(218, 218, 218), width=2,
+        )
+        vlabel = VIEW_LABEL_BY_KEY.get(view, view)
+        d.text((gx + 18, gy + 12), vlabel, fill=(65, 65, 65), font=f_label)
+
+        content_top = gy + 58
+        content_h = max(40, group_h - 72)
+        usable_w = group_w - 28 - inner_gap * (len(sizes) - 1)
+        x = gx + 14
+        path = os.path.join(job_dir, f"{view}_{mode}.png")
+        for s in sizes:
+            slot_w = max(20, int(usable_w * ratios[s] / total_ratio))
+            # キャラクター自体の寸法を段階的に変え、各スロットの下端で揃える。
+            side = max(20, min(slot_w, int((content_h - label_h) * ratios[s])))
+            px = x + (slot_w - side) // 2
+            py = content_top + content_h - label_h - side
+            if os.path.exists(path):
+                canvas.paste(_fit_panel(Image.open(path), side, side), (px, py))
+                d.rectangle([px, py, px + side, py + side], outline=(225, 225, 225), width=1)
+            else:
+                d.rectangle([px, py, px + side, py + side], outline=(225, 225, 225), width=1)
+            slabel = SIZE_LABEL_BY_KEY.get(s, s)
+            tw = d.textlength(slabel, font=f_label)
+            d.text((x + (slot_w - tw) / 2, gy + group_h - label_h + 2),
+                   slabel, fill=(135, 135, 135), font=f_label)
+            x += slot_w + inner_gap
+
+    out_path = os.path.join(job_dir, "sheet.png")
+    if layout == "grid":
+        canvas.save(out_path)
+    else:
+        canvas.save(out_path, dpi=(300, 300))
+    return out_path
 
 
 def compose_sheet_a4(

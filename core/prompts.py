@@ -42,6 +42,66 @@ def build_partial_prompt(target: str, color: str) -> str:
     return PARTIAL_COLOR_TEMPLATE.format(target=target, color=color)
 
 
+# 出力モード。多視点生成の前に入力をこの見た目へ整える。線画と部分彩色は、
+# 多視点生成後にも専用プロンプトを掛けて線と塗りの仕上がりを揃える。
+MODE_LABELS = [
+    ("real", "リアル"),
+    ("anime", "アニメ"),
+    ("partial", "部分彩色"),
+    ("illustration", "イラスト"),
+    ("lineart", "線画"),
+    ("chibi", "ちびキャラ"),
+]
+MODE_KEYS = [k for k, _ in MODE_LABELS]
+MODE_LABEL_BY_KEY = dict(MODE_LABELS)
+
+MODE_PROMPTS = {
+    "real": (
+        "Preserve the character's identity, facial features, hairstyle, costume, colors, "
+        "accessories and body proportions exactly. Render the character as a realistic "
+        "full-body studio character reference with natural skin and fabric texture, balanced "
+        "soft lighting, sharp details, a neutral standing pose, and a pure white background."
+    ),
+    "anime": (
+        "Preserve the character's identity, hairstyle, costume, colors, accessories and body "
+        "proportions exactly. Redraw the character as a polished Japanese anime character, "
+        "clean expressive linework, crisp cel shading, vivid controlled colors, a neutral "
+        "full-body standing pose, and a pure white background."
+    ),
+    "illustration": (
+        "Preserve the character's identity, hairstyle, costume, colors, accessories and body "
+        "proportions exactly. Redraw the character as a polished full-body character design "
+        "illustration, clean contours, refined digital painting, soft controlled shading, a "
+        "neutral standing pose, and a pure white background."
+    ),
+    "chibi": (
+        "Preserve the character's identity, hairstyle, costume, colors and accessories. "
+        "Redesign the character as an adorable super-deformed chibi character, two-and-a-half "
+        "heads tall, large expressive head, small compact body, clean anime linework, flat cel "
+        "colors, a neutral full-body standing pose, and a pure white background."
+    ),
+    # 多視点生成へ渡す基準画は色と形が明瞭な方が安定するため、線画系も一度
+    # フラットな設定画へ正規化し、ビュー生成後に LINEART_PROMPT で仕上げる。
+    "lineart": STYLIZE_PROMPT,
+    "partial": STYLIZE_PROMPT,
+}
+
+
+def build_mode_prompt(mode: str) -> str:
+    if mode not in MODE_PROMPTS:
+        raise ValueError(f"未知の表現モードです: {mode}")
+    return MODE_PROMPTS[mode]
+
+
+SIZE_LABELS = [
+    ("small", "小"),
+    ("medium", "中"),
+    ("large", "大"),
+]
+SIZE_KEYS = [k for k, _ in SIZE_LABELS]
+SIZE_LABEL_BY_KEY = dict(SIZE_LABELS)
+
+
 # ビュー定義(diffusers-image-server apps/charsheet/prompts.py の VIEWS と同じキー)
 VIEW_LABELS = [
     ("front", "前"),

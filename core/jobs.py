@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 """シート生成ジョブ(スレッド実行、同時1件)。
 
-パイプライン:
+現行の表現モード版パイプライン:
+  1. styling: 入力 → リアル/アニメ/イラスト/ちび等の基準画像(/api/edit)
+  2. views: charsheetで多視点を生成
+  3. finishing: 線画・部分彩色のみ各ビューを仕上げる
+  4. compose: 選択した小/中/大の表示倍率でシートを合成
+
+旧API互換パイプライン(mode未指定時):
   1. stylize(任意): 入力 → フラット彩色イラスト化(/api/edit)
   2. views: charsheet ジョブ(8方向、angles adapter)→ 選択ビューの画像を取得
   3. variants: 各ビューに 線画(/api/edit)、部分彩色(線画への2パス目 /api/edit)
@@ -22,9 +28,12 @@ from PIL import Image
 from core import client, config, sheet
 from core.prompts import (
     LINEART_PROMPT,
+    MODE_KEYS,
+    SIZE_KEYS,
     STYLIZE_PROMPT,
     VARIANT_KEYS,
     VIEW_KEYS,
+    build_mode_prompt,
     build_partial_prompt,
 )
 
@@ -100,7 +109,7 @@ def start_job(image_bytes: bytes, params: dict):
         f.write(image_bytes)
 
     views = params["views"]
-    variants = params["variants"]
+    variants = [params["mode"]] if params.get("mode") else params["variants"]
     job = {
         "job_id": job_id,
         "status": "queued",
@@ -122,6 +131,97 @@ def start_job(image_bytes: bytes, params: dict):
     return job_id
 
 
+def _run_mode_steps(job_id: str, job_dir: str, params: dict):
+    """表現モード版パイプライン。例外処理と実行枠の解放は _run_job が担う。"""
+    views = params["views"]
+    mode = params["mode"]
+    sizes = params.get("sizes") or ["small", "medium", "large"]
+    seed = params["seed"]
+    quant = params.get("quant") or config.DEFAULT_QUANT or None
+    lightning = params.get("lightning", True)
+
+    with open(os.path.join(job_dir, "input.png"), "rb") as f:
+        base_bytes = f.read()
+
+    # 1. 選択した表現へ基準画像を正規化する。
+    _update(job_id, status="styling")
+    w, h = _edit_dims_for(base_bytes)
+    base_bytes = client.edit(
+        base_bytes, build_mode_prompt(mode), seed, width=w, height=h,
+        quant=quant, lightning=lightning,
+    )
+    with open(os.path.join(job_dir, "prepared.png"), "wb") as f:
+        f.write(base_bytes)
+    _update(job_id, stylized=True)
+
+    # 2. 基準画像から多視点を生成する。
+    _update(job_id, status="views")
+    cs_job_id = client.charsheet_generate(base_bytes, seed)
+
+    def on_progress(st):
+        _update(job_id, charsheet={
+            "job_id": cs_job_id,
+            "status": st.get("status"),
+            "progress": st.get("progress"),
+            "total": st.get("total"),
+        })
+
+    cs_status = client.charsheet_wait(cs_job_id, on_progress=on_progress)
+    if cs_status.get("status") == "error":
+        raise client.ImageServerError(
+            f"多視点生成(charsheet)が失敗しました: {cs_status.get('error')}"
+        )
+
+    sources = {}
+    for view in views:
+        source = client.charsheet_view_image(cs_job_id, view)
+        sources[view] = source
+        with open(os.path.join(job_dir, f"{view}_source.png"), "wb") as f:
+            f.write(source)
+        if mode not in ("lineart", "partial"):
+            with open(os.path.join(job_dir, f"{view}_{mode}.png"), "wb") as f:
+                f.write(source)
+            _set_cell(job_id, view, mode, "done")
+
+    # 3. 線画系だけは各ビューを後段で仕上げ、線の品質を揃える。
+    if mode in ("lineart", "partial"):
+        _update(job_id, status="finishing")
+        partial_prompt = build_partial_prompt(
+            params.get("partial_target"), params.get("partial_color")
+        )
+        for view, source in sources.items():
+            try:
+                _set_cell(job_id, view, mode, "running")
+                w, h = _edit_dims_for(source)
+                lineart = client.edit(
+                    source, LINEART_PROMPT, seed, width=w, height=h,
+                    quant=quant, lightning=lightning,
+                )
+                with open(os.path.join(job_dir, f"{view}_lineart.png"), "wb") as f:
+                    f.write(lineart)
+                final = lineart
+                if mode == "partial":
+                    final = client.edit(
+                        lineart, partial_prompt, seed, width=w, height=h,
+                        quant=quant, lightning=lightning,
+                    )
+                    with open(os.path.join(job_dir, f"{view}_partial.png"), "wb") as f:
+                        f.write(final)
+                _set_cell(job_id, view, mode, "done")
+            except client.ImageServerError as exc:
+                _set_cell(job_id, view, mode, "error")
+                _record_cell_error(job_id, f"{view}/{mode}", str(exc))
+
+    # 4. 同じビューを選択された表示倍率で並べる。
+    _update(job_id, status="composing")
+    title = f"Character Design Sheet — seed={seed}  ({time.strftime('%Y-%m-%d %H:%M')})"
+    sheet.compose_mode_sheet(
+        job_dir, title, views, mode, sizes, layout=params.get("layout", "a4")
+    )
+    _build_zip(job_dir)
+    _update(job_id, status="done", sheet_ready=True, finished_at=time.time())
+
+
 def _run_job(job_id: str):
     global _current_job_id
     job_dir = _job_dir(job_id)
@@ -133,6 +233,10 @@ def _run_job(job_id: str):
     lightning = params.get("lightning", True)
 
     try:
+        if params.get("mode"):
+            _run_mode_steps(job_id, job_dir, params)
+            return
+
         with open(os.path.join(job_dir, "input.png"), "rb") as f:
             base_bytes = f.read()
 
@@ -234,7 +338,7 @@ def _run_job(job_id: str):
             _current_job_id = None
 
 
-def recompose_job(job_id: str, views, variants, layout, hero_view, hero_variant):
+def recompose_job(job_id: str, views, variants, layout, hero_view, hero_variant, sizes=None):
     """生成済み画像から sheet.png / download.zip を作り直す(GPU不要・即時)。
 
     ジョブで生成していないビューは自動的に除外して skipped として返す。
@@ -247,6 +351,36 @@ def recompose_job(job_id: str, views, variants, layout, hero_view, hero_variant)
     job_dir = _job_dir(job_id)
     if not os.path.isdir(job_dir):
         raise ValueError("ジョブの画像フォルダが見つかりません。")
+
+    mode = (job.get("params") or {}).get("mode")
+    if mode:
+        bad_views = [v for v in views if v not in VIEW_KEYS]
+        if bad_views or not views:
+            raise ValueError(f"ビュー指定が不正です: {bad_views}")
+        sizes = sizes or (job.get("params") or {}).get("sizes") or ["large"]
+        bad_sizes = [s for s in sizes if s not in SIZE_KEYS]
+        if bad_sizes or not sizes:
+            raise ValueError(f"サイズ指定が不正です: {bad_sizes}")
+        avail = [v for v in views
+                 if os.path.exists(os.path.join(job_dir, f"{v}_{mode}.png"))]
+        skipped = [v for v in views if v not in avail]
+        if not avail:
+            raise ValueError("指定ビューの生成済み画像がありません。")
+        seed = (job.get("params") or {}).get("seed", "-")
+        title = f"Character Design Sheet — seed={seed}  ({time.strftime('%Y-%m-%d %H:%M')})"
+        sheet.compose_mode_sheet(job_dir, title, avail, mode, sizes, layout=layout)
+        _build_zip(job_dir)
+        with _jobs_lock:
+            target = _jobs.get(job_id) or job
+            target["sheet_ready"] = True
+            target["sheet_rev"] = int(target.get("sheet_rev", 0)) + 1
+            target["recompose"] = {
+                "views": avail, "mode": mode, "sizes": sizes, "layout": layout,
+            }
+            with open(os.path.join(job_dir, "job.json"), "w", encoding="utf-8") as f:
+                json.dump(target, f, ensure_ascii=False, indent=1)
+            return {"sheet_rev": target["sheet_rev"], "views": avail,
+                    "skipped_views": skipped}
 
     validate_params(views, variants)
     check = list(dict.fromkeys(list(variants) + ["color"]))
@@ -301,3 +435,14 @@ def validate_params(views, variants):
         raise ValueError("ビューを1つ以上選択してください。")
     if not variants:
         raise ValueError("変種を1つ以上選択してください。")
+
+
+def validate_mode_params(views, mode, sizes):
+    bad_views = [v for v in views if v not in VIEW_KEYS]
+    if bad_views or not views:
+        raise ValueError(f"ビューを1つ以上正しく選択してください: {bad_views}")
+    if mode not in MODE_KEYS:
+        raise ValueError(f"未知の表現モードです: {mode}")
+    bad_sizes = [s for s in sizes if s not in SIZE_KEYS]
+    if bad_sizes or not sizes:
+        raise ValueError(f"サイズを1つ以上正しく選択してください: {bad_sizes}")

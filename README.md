@@ -1,7 +1,11 @@
 # design-sheet-server — マルチキャラクターシート作成
 
-1枚のキャラクター画像から、**多視点(前/後ろ/左/右/45°) × 変種(彩色イラスト/線画/部分彩色)** の
-グリッド状キャラクターシートを生成する Web アプリ。
+1枚のキャラクター画像から、**表現モード × 多視点 × 表示サイズ** の
+キャラクターデザインシートを生成する Web アプリ。
+
+- 表現モード: リアル / アニメ / 部分彩色 / イラスト / 線画 / ちびキャラ
+- ビュー: 前 / 後ろ / 左右 / 前後45°
+- 表示サイズ: 小 / 中 / 大(複数選択可)
 
 ## アーキテクチャ
 
@@ -17,13 +21,13 @@
 
 パイプライン(ジョブ式、同時1件):
 
-1. **stylize**(任意、既定ON): 入力写真をフラット彩色イラスト化(`/api/edit`)
+1. **styling**: 入力を選択した表現モードの基準画像へ変換(`/api/edit`)
 2. **views**: charsheet ジョブで8方向生成(Multiple-angles LoRA)→ 選択ビューを取得
-3. **variants**: 各ビューへ 線画化(`/api/edit` 1回)、部分彩色(**線画への2パス目**)
+3. **finishing**: 線画・部分彩色モードだけ各ビューを追加変換。部分彩色は線画への2パス目
    - ※1パスで「線画化+部分彩色」を同時指示すると Lightning cfg=1.0 では色指定が
      脱落することを実測済み(2026-09-09)。2パス方式なら線画と部分彩色版の線が
      同一になる利点もある
-4. **compose**: PILでグリッド合成(`sheet.png`)+ 全画像ZIP
+4. **compose**: 同じビューを選択した小・中・大の倍率で配置(`sheet.png`)+ 全画像ZIP
 
 使用モデル(バックエンド側): Qwen-Image-Edit-2511 + Lightning 4steps
 (+ 多視点は fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA)。
@@ -50,18 +54,16 @@ CUDA_VISIBLE_DEVICES=1 DS_QUANT=gguf-q4_k_m DS_OFFLOAD=model_cpu \
 
 | エンドポイント | 説明 |
 |---|---|
-| `POST /api/sheet/generate` | multipart: `image` 必須。Form: `seed`(-1=ランダム) / `views`(CSV、既定 front,back,left,right,front_left_45,front_right_45) / `variants`(CSV、既定 color,lineart,partial) / `stylize`(bool) / `partial_target` / `partial_color` / `quant`("gguf-q4_k_m" 等、空=バックエンド現状) / `lightning` / `layout`("a4"=A4横300dpi・印刷向け(既定) / "grid"=旧・横長グリッド) / `hero_variant`(A4の主役大判パネル: "lineart"(既定)/"color"/"partial"/"none") / `hero_view`(主役のビュー、既定 "front") |
-
-A4レイアウトは主役あり(既定)のとき「左1/2の上=入力(元画像)・下=主役パネル、右1/2=多視点グリッド」構成。`hero_variant=none` でグリッドのみの中央配置(入力はヘッダ右上のサムネイル)になる。
+| `POST /api/sheet/generate` | multipart: `image` 必須。Form: `seed`(-1=ランダム) / `mode`(`real`,`anime`,`partial`,`illustration`,`lineart`,`chibi`) / `views`(CSV) / `sizes`(`small`,`medium`,`large` のCSV) / `partial_target` / `partial_color` / `quant` / `lightning` / `layout`(`a4` または `grid`)。`mode`未指定時は旧`variants` APIとして処理 |
 | `GET /api/sheet/jobs/{id}` | ジョブ状態(セル単位のステータス、charsheet進捗、cell_errors) |
 | `GET /api/sheet/jobs/{id}/images/{name}.png` | 個別画像(`input` / `stylized` / `{view}_{variant}`) |
 | `GET /api/sheet/jobs/{id}/sheet.png` | 合成シート |
 | `GET /api/sheet/jobs/{id}/download.zip` | 全PNGのZIP |
 | `GET /api/health` | バックエンド疎通(空きVRAM等) |
-| `GET /api/meta` | ビュー/変種の一覧(UI用) |
+| `GET /api/meta` | ビュー/表現モード/表示サイズの一覧(UI用) |
 
 ビューキー: `front` `back` `left` `right` `front_left_45` `front_right_45` `back_left_45` `back_right_45`
-変種キー: `color`(charsheet出力そのまま) `lineart` `partial`
+表示サイズはシート上の倍率で、生成画像そのものを低解像度化する指定ではない。
 
 ## 環境変数
 

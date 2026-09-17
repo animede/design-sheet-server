@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """design-sheet-server — マルチキャラクターシート作成アプリ。
 
-1枚のキャラ画像から「多視点(前/後/横/45°) × 変種(彩色/線画/部分彩色)」の
-グリッドシートを生成する。GPU処理は diffusers-image-server(/api/edit・
+1枚のキャラ画像から「表現モード(リアル/アニメ/部分彩色/イラスト/線画/
+ちびキャラ) × 多視点 × 表示サイズ」のデザインシートを生成する。
+GPU処理は diffusers-image-server(/api/edit・
 /api/charsheet)へHTTP委譲し、本アプリはジョブ管理・2パス部分彩色の
 オーケストレーション・PILシート合成・UIのみを持つ(GPU/モデルロード無し)。
 
@@ -21,6 +22,10 @@ from core import client, config, jobs
 from core.prompts import (
     DEFAULT_PARTIAL_COLOR,
     DEFAULT_PARTIAL_TARGET,
+    MODE_KEYS,
+    MODE_LABELS,
+    SIZE_KEYS,
+    SIZE_LABELS,
     VARIANT_LABELS,
     VIEW_LABELS,
 )
@@ -38,14 +43,43 @@ def _check_job_id(job_id: str):
         raise HTTPException(status_code=404, detail="不正なジョブIDです")
 
 
+@app.get("/api/fetch-image")
+async def fetch_image(url: str):
+    """他タブからD&Dされた画像URLの取り込み(CORS回避のローカル専用プロキシ)。"""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or parsed.hostname not in (
+        "localhost", "127.0.0.1", "::1",
+    ):
+        raise HTTPException(status_code=400, detail="ローカルのURLのみ取得できます")
+    import requests
+    from starlette.concurrency import run_in_threadpool
+
+    try:
+        resp = await run_in_threadpool(requests.get, url, timeout=15)
+        resp.raise_for_status()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"画像の取得に失敗しました: {e}")
+    ctype = resp.headers.get("content-type", "")
+    if not ctype.startswith("image/"):
+        raise HTTPException(status_code=415, detail="画像ではありません")
+    from fastapi.responses import Response
+    return Response(content=resp.content, media_type=ctype)
+
+
 @app.get("/api/meta")
 async def meta():
     return {
         "views": [{"key": k, "label": l} for k, l in VIEW_LABELS],
         "variants": [{"key": k, "label": l} for k, l in VARIANT_LABELS],
+        "modes": [{"key": k, "label": l} for k, l in MODE_LABELS],
+        "sizes": [{"key": k, "label": l} for k, l in SIZE_LABELS],
         "defaults": {
             "partial_target": DEFAULT_PARTIAL_TARGET,
             "partial_color": DEFAULT_PARTIAL_COLOR,
+            "mode": "illustration",
+            "sizes": ["small", "medium", "large"],
         },
         "image_server_url": config.IMAGE_SERVER_URL,
     }
@@ -79,9 +113,20 @@ async def generate(
     layout: str = Form("a4"),
     hero_variant: str = Form("lineart"),
     hero_view: str = Form("front"),
+    mode: str = Form(""),
+    sizes: str = Form("small,medium,large"),
 ):
     if layout not in ("a4", "grid"):
         raise HTTPException(status_code=400, detail="layout は a4 / grid のいずれかを指定してください。")
+    mode = mode.strip().lower()
+    size_list = list(dict.fromkeys(s.strip().lower() for s in sizes.split(",") if s.strip()))
+    if mode:
+        if mode not in MODE_KEYS:
+            raise HTTPException(status_code=400, detail=f"mode は {MODE_KEYS} から選択してください。")
+        bad_sizes = [s for s in size_list if s not in SIZE_KEYS]
+        if bad_sizes or not size_list:
+            raise HTTPException(status_code=400, detail=f"sizes は {SIZE_KEYS} から1つ以上選択してください。")
+
     hero_variant = hero_variant.strip().lower()
     hero_view = hero_view.strip().lower()
     if hero_variant in ("", "none"):
@@ -93,7 +138,10 @@ async def generate(
     view_list = [v.strip() for v in views.split(",") if v.strip()]
     variant_list = [v.strip() for v in variants.split(",") if v.strip()]
     try:
-        jobs.validate_params(view_list, variant_list)
+        if mode:
+            jobs.validate_mode_params(view_list, mode, size_list)
+        else:
+            jobs.validate_params(view_list, variant_list)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -122,6 +170,8 @@ async def generate(
         "layout": layout,
         "hero_variant": hero_variant,
         "hero_view": hero_view,
+        "mode": mode or None,
+        "sizes": size_list,
     }
     try:
         job_id = jobs.start_job(image_bytes, params)
@@ -138,6 +188,7 @@ async def recompose(
     layout: str = Form(""),
     hero_variant: str = Form(""),
     hero_view: str = Form(""),
+    sizes: str = Form(""),
 ):
     """生成済み画像からシートを再合成する(生成なし・数秒)。空の項目は元ジョブの設定を使う。"""
     _check_job_id(job_id)
@@ -162,8 +213,16 @@ async def recompose(
     if hv and hview not in [k for k, _ in VIEW_LABELS]:
         raise HTTPException(status_code=400, detail="hero_view が不正です。")
 
+    size_list = list(dict.fromkeys(s.strip().lower() for s in sizes.split(",") if s.strip()))
+    if not size_list:
+        size_list = p.get("sizes") or ["small", "medium", "large"]
+    bad_sizes = [s for s in size_list if s not in SIZE_KEYS]
+    if bad_sizes:
+        raise HTTPException(status_code=400, detail=f"sizes に不正な値があります: {bad_sizes}")
+
     try:
-        result = jobs.recompose_job(job_id, view_list, variant_list, layout, hview, hv)
+        result = jobs.recompose_job(job_id, view_list, variant_list, layout, hview, hv,
+                                    sizes=size_list)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if result is None:

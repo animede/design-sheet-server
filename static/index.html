@@ -23,19 +23,25 @@
 
     <div class="field-row">
       <label>シード <input type="number" id="seed" value="-1" title="-1 でランダム"></label>
-      <label class="check"><input type="checkbox" id="stylize" checked> 先にイラスト化(写真入力向け)</label>
     </div>
+
+    <h3>表現モード</h3>
+    <p class="field-help">仕上げたい見た目を1つ選択</p>
+    <div id="modeChoices" class="mode-grid"></div>
 
     <h3>ビュー</h3>
     <div id="viewChecks" class="check-grid"></div>
 
-    <h3>変種</h3>
-    <div id="variantChecks" class="check-grid"></div>
+    <h3>シート内の表示サイズ</h3>
+    <p class="field-help">選んだサイズを各ビューに並べます</p>
+    <div id="sizeChecks" class="size-grid"></div>
 
-    <h3>部分彩色</h3>
-    <div class="field-col">
+    <div id="partialSettings" hidden>
+      <h3>部分彩色</h3>
+      <div class="field-col">
       <label>対象 <input type="text" id="partialTarget"></label>
       <label>色 <input type="text" id="partialColor"></label>
+      </div>
     </div>
 
     <h3>生成設定</h3>
@@ -46,15 +52,6 @@
           <option value="grid">グリッド(横長・画面確認向け)</option>
         </select>
       </label>
-      <label>主役パネル(大判、A4のみ)
-        <select id="heroVariant">
-          <option value="lineart">線画(既定)</option>
-          <option value="color">彩色</option>
-          <option value="partial">部分彩色</option>
-          <option value="none">なし</option>
-        </select>
-      </label>
-      <label>主役ビュー <select id="heroView"></select></label>
       <label>量子化
         <select id="quant">
           <option value="">サーバ現状のまま(既定)</option>
@@ -80,7 +77,7 @@
         <a id="zipLink" download>全画像ZIP</a>
       </p>
       <p>
-        <button id="recomposeBtn" class="secondary">フォームの設定で再配置(生成なし・数秒)</button>
+        <button id="recomposeBtn" class="secondary">ビュー・サイズを変えて再配置</button>
         <span id="recomposeMsg" class="muted"></span>
       </p>
     </div>
