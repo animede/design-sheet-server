@@ -3,9 +3,11 @@
 import base64
 import io
 import os
+import re
 
 import boto3
 import qrcode
+from boto3.exceptions import Boto3Error
 from botocore.client import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -16,19 +18,39 @@ class CloudShareError(RuntimeError):
     """クラウド共有処理で利用者へ表示できるエラー。"""
 
 
+def _error_code(exc: Exception) -> str:
+    """S3のエラーコード(AccessDenied 等)を取り出す。認証情報は含まれない。
+
+    upload_file は高水準APIなので ClientError を S3UploadFailedError で包む。
+    その場合 response 属性が無く、コードはメッセージの中にしか無い。
+    """
+    response = getattr(exc, "response", None)
+    if isinstance(response, dict):
+        code = response.get("Error", {}).get("Code")
+        if code:
+            return str(code)
+    m = re.search(r"An error occurred \(([A-Za-z0-9]+)\)", str(exc))
+    return m.group(1) if m else type(exc).__name__
+
+
 def is_enabled() -> bool:
     return config.R2_SHARE_ENABLED
 
 
 def _client():
-    return boto3.client(
-        "s3",
-        endpoint_url=config.R2_ENDPOINT,
-        aws_access_key_id=config.R2_ACCESS_KEY_ID,
-        aws_secret_access_key=config.R2_SECRET_ACCESS_KEY,
-        region_name="auto",
-        config=Config(signature_version="s3v4"),
-    )
+    try:
+        return boto3.client(
+            "s3",
+            endpoint_url=config.R2_ENDPOINT,
+            aws_access_key_id=config.R2_ACCESS_KEY_ID,
+            aws_secret_access_key=config.R2_SECRET_ACCESS_KEY,
+            region_name="auto",
+            config=Config(signature_version="s3v4"),
+        )
+    except (BotoCoreError, ClientError, ValueError) as exc:
+        # エンドポイントURLが不正だと botocore は ValueError を投げる。捕まえないと
+        # 設定ミスがそのまま 500 になり、UIには理由が出ない。
+        raise CloudShareError(f"R2の接続設定が不正です ({type(exc).__name__})") from exc
 
 
 def _qr_data_url(url: str) -> str:
@@ -77,9 +99,19 @@ def share_sheet(job_id: str, sheet_path: str) -> dict:
             },
             ExpiresIn=config.R2_URL_TTL_S,
         )
-    except (BotoCoreError, ClientError, OSError) as exc:
+    # upload_file は ClientError を boto3.exceptions.S3UploadFailedError で包むため、
+    # botocore 側の例外だけを捕まえると 500 になる(実際に踏んだ)。Boto3Error も見る。
+    except (BotoCoreError, Boto3Error, ClientError, OSError) as exc:
         # 応答本文や署名URLをそのままUIへ返さず、認証情報漏えいを避ける。
-        raise CloudShareError(f"R2へのアップロードに失敗しました ({type(exc).__name__})") from exc
+        # エラーコード(AccessDenied 等)だけは原因究明に要るので残す。
+        code = _error_code(exc)
+        hint = {
+            "AccessDenied": " — APIトークンに対象バケットの Object Read & Write 権限がありません",
+            "NoSuchBucket": f" — バケット {config.R2_BUCKET} が存在しません",
+            "InvalidAccessKeyId": " — Access Key ID が誤っています",
+            "SignatureDoesNotMatch": " — Secret Access Key が誤っています",
+        }.get(code, "")
+        raise CloudShareError(f"R2へのアップロードに失敗しました ({code}){hint}") from exc
 
     try:
         qr_data_url = _qr_data_url(url)

@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+from botocore.exceptions import ClientError
+
 from core import cloud_share
 
 
@@ -26,6 +28,53 @@ class CloudShareTests(unittest.TestCase):
         with mock.patch.object(cloud_share, "is_enabled", return_value=False):
             with self.assertRaisesRegex(cloud_share.CloudShareError, "設定されていません"):
                 cloud_share.share_sheet("0123456789ab", "/not/used.png")
+
+    def test_invalid_endpoint_is_reported_as_configuration_error(self):
+        """設定ミスで boto3 が ValueError を投げても 500 にせず利用者向けエラーにする。"""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(b"png")
+            path = f.name
+        try:
+            with (
+                mock.patch.object(cloud_share, "is_enabled", return_value=True),
+                mock.patch.object(cloud_share.config, "R2_ENDPOINT",
+                                  "https://ACCOUNT_ID.r2.cloudflarestorage.com"),
+                mock.patch.object(cloud_share.config, "R2_ACCESS_KEY_ID", "dummy"),
+                mock.patch.object(cloud_share.config, "R2_SECRET_ACCESS_KEY", "dummy"),
+            ):
+                with self.assertRaisesRegex(cloud_share.CloudShareError, "接続設定が不正"):
+                    cloud_share.share_sheet("0123456789ab", path)
+        finally:
+            os.unlink(path)
+
+    def test_upload_failure_reports_s3_error_code(self):
+        """upload_file が包む S3UploadFailedError も 500 にせず理由を返す。"""
+        from boto3.exceptions import S3UploadFailedError
+
+        class FailingClient(FakeS3Client):
+            def upload_file(self, *args, **kwargs):
+                raise S3UploadFailedError(
+                    "Failed to upload a to b: An error occurred (AccessDenied) "
+                    "when calling the PutObject operation: Access Denied")
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(b"png")
+            path = f.name
+        try:
+            with (
+                mock.patch.object(cloud_share, "is_enabled", return_value=True),
+                mock.patch.object(cloud_share, "_client", return_value=FailingClient()),
+                mock.patch.object(cloud_share.config, "R2_BUCKET", "test-bucket"),
+            ):
+                with self.assertRaisesRegex(cloud_share.CloudShareError,
+                                            "AccessDenied.*Object Read & Write"):
+                    cloud_share.share_sheet("0123456789ab", path)
+        finally:
+            os.unlink(path)
+
+    def test_error_code_from_client_error(self):
+        exc = ClientError({"Error": {"Code": "NoSuchBucket"}}, "PutObject")
+        self.assertEqual(cloud_share._error_code(exc), "NoSuchBucket")
 
     def test_upload_presign_and_qr(self):
         fake = FakeS3Client()

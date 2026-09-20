@@ -93,9 +93,35 @@ CUDA_VISIBLE_DEVICES=1 DS_QUANT=gguf-q4_k_m DS_OFFLOAD=model_cpu \
 Git管理対象外になっている。`chmod 600 .env` で閲覧権限を制限し、設定後はアプリを
 再起動する。
 
+**`DS_SHEET_R2_ENDPOINT` の `ACCOUNT_ID` は実アカウントIDへ必ず置き換える**
+(Cloudflareダッシュボード → R2 → バケット →「S3 API」のホスト部分)。プレースホルダの
+ままだと共有は無効のままで、起動ログに理由が出る:
+
+```
+[design-sheet] Cloudflare R2共有は無効: .env.example のプレースホルダ ACCOUNT_ID が残っている
+```
+
 認証情報をソースコードやGitへ保存しないこと。R2 APIトークンは対象バケットだけの
 `Object Read & Write` 権限に限定する。URL期限はオブジェクト削除ではないため、R2側で
 `design-sheets/` プレフィックスを1～2日後に削除するObject lifecycle ruleも設定する。
+
+## テスト
+
+```bash
+./venv/bin/python -m unittest tests.test_cloud_share tests.test_share_api tests.test_config tests.test_prompts
+```
+
+`tests/` に `__init__.py` を置いていないため、`unittest discover` ではなくモジュール指定で実行する。
+
+## tools/
+
+R2共有のセットアップと切り分け用。いずれもリポジトリ直下から実行する。
+
+| スクリプト | 用途 |
+|---|---|
+| `tools/set_r2_endpoint.sh '<ID または S3 API URL>'` | `.env` の `DS_SHEET_R2_ENDPOINT` を実アカウントIDへ書き換える(形式を検証し、不正なら書き換えない) |
+| `./venv/bin/python tools/diagnose_r2.py` | 一覧・参照・書き込み・削除を個別に試し、権限とバケット名のどちらが原因かを切り分ける |
+| `./venv/bin/python tools/verify_share.py <job_id>` | 実アップロード→署名URLでの取得までを通しで検証する。署名URLは表示しない |
 
 ## 制約・注意
 

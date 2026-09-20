@@ -76,9 +76,10 @@ MODE_PROMPTS = {
     ),
     "chibi": (
         "Preserve the character's identity, hairstyle, costume, colors and accessories. "
-        "Redesign the character as an adorable super-deformed chibi character, two-and-a-half "
-        "heads tall, large expressive head, small compact body, clean anime linework, flat cel "
-        "colors, a neutral full-body standing pose, and a pure white background."
+        "Redesign this same person as an adorable super-deformed chibi character with an "
+        "oversized expressive head and a small compact body. Use clean anime linework, flat cel "
+        "colors and a neutral standing pose. The final image must show exactly one complete "
+        "full-body character, centered alone from head to toe on a pure white background."
     ),
     # 多視点生成へ渡す基準画は色と形が明瞭な方が安定するため、線画系も一度
     # フラットな設定画へ正規化し、ビュー生成後に LINEART_PROMPT で仕上げる。

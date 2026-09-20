@@ -4,3 +4,7 @@ outputs/
 .claude/
 .env
 venv/
+# エディタの一時ファイル。.env を編集すると ..env.swp に中身が残るため必ず除外する
+*.swp
+*.swo
+*~

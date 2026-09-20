@@ -6,6 +6,9 @@
 diffusers-server CLAUDE.md 28番の流儀)。
 """
 import os
+import re
+import sys
+import urllib.parse
 
 from dotenv import load_dotenv
 
@@ -45,14 +48,46 @@ SHEET_PANEL_PX = int(_get("DS_SHEET_PANEL_PX", "512"))
 
 # Cloudflare R2 への一時共有。4項目がすべて設定されている場合だけUI/APIを有効化する。
 # 認証情報はリポジトリへ保存せず、起動プロセスの環境変数からのみ読み込む。
+
+# botocore が受け付けるホスト名(英数とハイフンのラベル)。アンダースコアは通らない。
+_HOSTNAME_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$")
+
+
+def _endpoint_problem(url: str) -> str:
+    """R2エンドポイントを共有に使えない理由を返す(問題なければ空文字)。
+
+    値が空でないだけで有効と見なすと、.env.example のプレースホルダのままでも
+    共有ボタンが出てしまい、押した時点で botocore の ValueError になる。
+    """
+    if not url:
+        return "未設定"
+    if "ACCOUNT_ID" in url:
+        return ".env.example のプレースホルダ ACCOUNT_ID が残っている"
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        return f"スキームが http/https でない ({parts.scheme or 'なし'})"
+    host = (parts.hostname or "").rstrip(".")
+    if not host or not _HOSTNAME_RE.match(host):
+        return f"ホスト名が不正 ({host or 'なし'})"
+    return ""
+
+
 R2_ENDPOINT = _get("DS_SHEET_R2_ENDPOINT", "").rstrip("/")
 R2_BUCKET = _get("DS_SHEET_R2_BUCKET", "")
 R2_ACCESS_KEY_ID = _get("DS_SHEET_R2_ACCESS_KEY_ID", "")
 R2_SECRET_ACCESS_KEY = _get("DS_SHEET_R2_SECRET_ACCESS_KEY", "")
 R2_URL_TTL_S = max(60, min(604800, int(_get("DS_SHEET_R2_URL_TTL_S", "86400"))))
+R2_ENDPOINT_PROBLEM = _endpoint_problem(R2_ENDPOINT)
 R2_SHARE_ENABLED = all((
     R2_ENDPOINT,
     R2_BUCKET,
     R2_ACCESS_KEY_ID,
     R2_SECRET_ACCESS_KEY,
-))
+)) and not R2_ENDPOINT_PROBLEM
+
+# 設定しかけで無効になっている場合だけ、起動ログへ理由を出す(値は出さない)。
+if not R2_SHARE_ENABLED and any(
+    (R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY)
+):
+    _reason = R2_ENDPOINT_PROBLEM or "endpoint/bucket/access key/secret のいずれかが空"
+    print(f"[design-sheet] Cloudflare R2共有は無効: {_reason}", file=sys.stderr)
