@@ -16,9 +16,11 @@ async function init() {
   $("imageInput").addEventListener("change", onFileSelected);
   $("startBtn").addEventListener("click", startJob);
   $("recomposeBtn").addEventListener("click", recompose);
+  $("cloudShareBtn").addEventListener("click", shareToCloud);
   setupDragDrop();
 
   META = await (await fetch("/api/meta")).json();
+  $("cloudShareSection").hidden = !META.cloud_share?.enabled;
 
   const defaultViews = new Set([
     "front", "back", "left", "right", "front_left_45", "front_right_45",
@@ -90,6 +92,7 @@ async function openJob(jobId) {
   const job = await (await fetch(`/api/sheet/jobs/${jobId}`)).json();
   if (!job || !job.views) return;
   currentJobId = jobId;
+  resetCloudShare();
   const views = Object.keys(job.views);
   const variants = views.length ? Object.keys(job.views[views[0]]) : [];
   loadedImages.clear();
@@ -255,6 +258,7 @@ async function startJob() {
     const body = await resp.json();
     if (!resp.ok) throw new Error(body.detail || resp.status);
     currentJobId = body.job_id;
+    resetCloudShare();
     buildCellGrid(views, isMix ? variants : [mode]);
     $("sheetArea").hidden = true;
     loadedImages.clear();
@@ -279,11 +283,44 @@ async function recompose() {
     const body = await resp.json();
     if (!resp.ok) throw new Error(body.detail || resp.status);
     $("sheetImg").src = `/api/sheet/jobs/${currentJobId}/sheet.png?v=${body.sheet_rev}`;
+    resetCloudShare();
     msg.textContent = body.skipped_views.length
       ? `完了(未生成のためスキップ: ${body.skipped_views.join(", ")})`
       : "完了";
   } catch (e) {
     msg.textContent = `失敗: ${e.message}`;
+  }
+}
+
+function resetCloudShare() {
+  $("cloudShareResult").hidden = true;
+  $("cloudShareQr").removeAttribute("src");
+  $("cloudShareLink").removeAttribute("href");
+  $("cloudShareMsg").textContent = "";
+  $("cloudShareBtn").disabled = false;
+}
+
+async function shareToCloud() {
+  if (!currentJobId) return;
+  const btn = $("cloudShareBtn");
+  const msg = $("cloudShareMsg");
+  btn.disabled = true;
+  msg.textContent = "R2へアップロード中…";
+  $("cloudShareResult").hidden = true;
+  try {
+    const resp = await fetch(`/api/sheet/jobs/${currentJobId}/share`, { method: "POST" });
+    const body = await resp.json();
+    if (!resp.ok) throw new Error(body.detail || resp.status);
+    $("cloudShareQr").src = body.qr_data_url;
+    $("cloudShareLink").href = body.url;
+    const expiresAt = new Date(Date.now() + body.expires_in * 1000);
+    $("cloudShareExpiry").textContent = `URL有効期限: ${expiresAt.toLocaleString("ja-JP")}`;
+    $("cloudShareResult").hidden = false;
+    msg.textContent = "アップロード完了";
+  } catch (e) {
+    msg.textContent = `共有に失敗しました: ${e.message}`;
+  } finally {
+    btn.disabled = false;
   }
 }
 

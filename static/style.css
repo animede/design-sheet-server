@@ -108,6 +108,27 @@ button.secondary {
 .sheet-preview { max-width: 100%; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
 a { color: var(--accent); }
 
+.cloud-share {
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+}
+.cloud-share-result {
+  display: flex; align-items: center; gap: 16px; margin-top: 12px;
+  padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg);
+}
+.cloud-share-result img {
+  width: 240px; height: 240px; padding: 6px; background: #fff; border-radius: 6px;
+}
+.cloud-share-result p { margin: 6px 0; }
+
+@media (max-width: 720px) {
+  main { flex-direction: column; padding: 12px; }
+  .form-panel { width: 100%; }
+  .result-panel { width: 100%; }
+  .cloud-share-result { flex-direction: column; align-items: flex-start; }
+  .cloud-share-result img { width: min(100%, 320px); height: auto; align-self: center; }
+}
+
 /* 生成済みシート履歴 */
 .history-list { list-style: none; padding: 0; margin: 4px 0 0; }
 .history-list li { padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 13px; }

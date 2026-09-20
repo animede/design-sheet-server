@@ -3,3 +3,6 @@ uvicorn
 python-multipart
 Pillow
 requests
+boto3
+qrcode[pil]
+python-dotenv

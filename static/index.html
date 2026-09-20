@@ -93,6 +93,18 @@
         <button id="recomposeBtn" class="secondary">ビュー・サイズを変えて再配置</button>
         <span id="recomposeMsg" class="muted"></span>
       </p>
+      <div id="cloudShareSection" class="cloud-share" hidden>
+        <button id="cloudShareBtn" class="secondary">クラウド共有用QRコードを作成</button>
+        <span id="cloudShareMsg" class="muted"></span>
+        <div id="cloudShareResult" class="cloud-share-result" hidden>
+          <img id="cloudShareQr" alt="クラウド共有ダウンロード用QRコード">
+          <div>
+            <p>別のスマホやiPadで読み取ってください。</p>
+            <p><a id="cloudShareLink" target="_blank" rel="noopener">ダウンロードURLを開く</a></p>
+            <p id="cloudShareExpiry" class="muted"></p>
+          </div>
+        </div>
+      </div>
     </div>
     <div id="historyArea">
       <h3>生成済みシート</h3>

@@ -59,6 +59,7 @@ CUDA_VISIBLE_DEVICES=1 DS_QUANT=gguf-q4_k_m DS_OFFLOAD=model_cpu \
 | `GET /api/sheet/jobs/{id}/images/{name}.png` | 個別画像(`input` / `stylized` / `{view}_{variant}`) |
 | `GET /api/sheet/jobs/{id}/sheet.png` | 合成シート |
 | `GET /api/sheet/jobs/{id}/download.zip` | 全PNGのZIP |
+| `POST /api/sheet/jobs/{id}/share` | 完成シートをR2へアップロードし、期限付きURLとQR画像を返す |
 | `GET /api/health` | バックエンド疎通(空きVRAM等) |
 | `GET /api/meta` | ビュー/表現モード/表示サイズの一覧(UI用) |
 
@@ -76,6 +77,25 @@ CUDA_VISIBLE_DEVICES=1 DS_QUANT=gguf-q4_k_m DS_OFFLOAD=model_cpu \
 | `DS_SHEET_EDIT_SIZE` | 0 | 変種パスの生成解像度(0=バックエンド自動推定) |
 | `DS_SHEET_PANEL_PX` | 512 | シート合成の1パネル幅 |
 | `DS_SHEET_BUSY_RETRIES` / `DS_SHEET_BUSY_RETRY_INTERVAL_S` | 60 / 10.0 | バックエンド409時のリトライ |
+| `DS_SHEET_R2_ENDPOINT` | (空) | R2のS3 API endpoint。共有機能の有効化に必須 |
+| `DS_SHEET_R2_BUCKET` | (空) | アップロード先R2バケット名 |
+| `DS_SHEET_R2_ACCESS_KEY_ID` | (空) | バケット限定のR2 Access Key ID |
+| `DS_SHEET_R2_SECRET_ACCESS_KEY` | (空) | バケット限定のR2 Secret Access Key |
+| `DS_SHEET_R2_URL_TTL_S` | 86400 | QRコードの期限付きURLの有効秒数(60～604800) |
+
+### Cloudflare R2 でスマホへ共有
+
+上記4つの必須環境変数を設定すると、生成結果に「クラウド共有用QRコードを作成」
+ボタンが表示される。押した時だけ `sheet.png` を非公開バケットへアップロードし、
+既定24時間有効の署名付きダウンロードURLをQRコードとして表示する。
+
+設定例は `.env.example` を `.env` へコピーして使う。`.env` は起動時に自動読込され、
+Git管理対象外になっている。`chmod 600 .env` で閲覧権限を制限し、設定後はアプリを
+再起動する。
+
+認証情報をソースコードやGitへ保存しないこと。R2 APIトークンは対象バケットだけの
+`Object Read & Write` 権限に限定する。URL期限はオブジェクト削除ではないため、R2側で
+`design-sheets/` プレフィックスを1～2日後に削除するObject lifecycle ruleも設定する。
 
 ## 制約・注意
 

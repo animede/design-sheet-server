@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps
 
-from core import client, config, jobs
+from core import client, cloud_share, config, jobs
 from core.prompts import (
     DEFAULT_PARTIAL_COLOR,
     DEFAULT_PARTIAL_TARGET,
@@ -100,6 +100,10 @@ async def meta():
             "sizes": ["small", "medium", "large"],
         },
         "image_server_url": config.IMAGE_SERVER_URL,
+        "cloud_share": {
+            "enabled": cloud_share.is_enabled(),
+            "expires_in": config.R2_URL_TTL_S,
+        },
     }
 
 
@@ -303,6 +307,27 @@ async def job_zip(job_id: str):
         filename=f"design_sheet_{job_id}.zip",
         headers={"Cache-Control": "no-store"},
     )
+
+
+@app.post("/api/sheet/jobs/{job_id}/share")
+async def share_job_sheet(job_id: str):
+    """完成したsheet.pngを非公開R2へ送り、期限付きURLとQRコードを返す。"""
+    from starlette.concurrency import run_in_threadpool
+
+    _check_job_id(job_id)
+    if not cloud_share.is_enabled():
+        raise HTTPException(status_code=503, detail="Cloudflare R2が設定されていません")
+    job = jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="ジョブが見つかりません")
+    if not job.get("sheet_ready"):
+        raise HTTPException(status_code=409, detail="シートがまだ完成していません")
+    sheet_path = _job_file(job_id, "sheet.png")
+    try:
+        result = await run_in_threadpool(cloud_share.share_sheet, job_id, sheet_path)
+    except cloud_share.CloudShareError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"ok": True, **result}
 
 
 app.mount("/", StaticFiles(directory=os.path.join(config.PROJECT_ROOT, "static"), html=True),

@@ -7,7 +7,10 @@ diffusers-server CLAUDE.md 28番の流儀)。
 """
 import os
 
+from dotenv import load_dotenv
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 
 def _get(name: str, default: str) -> str:
@@ -39,3 +42,17 @@ BUSY_RETRY_INTERVAL_S = float(_get("DS_SHEET_BUSY_RETRY_INTERVAL_S", "10.0"))
 
 # シート合成の1パネル幅(px)。高さはアスペクト比維持でフィット
 SHEET_PANEL_PX = int(_get("DS_SHEET_PANEL_PX", "512"))
+
+# Cloudflare R2 への一時共有。4項目がすべて設定されている場合だけUI/APIを有効化する。
+# 認証情報はリポジトリへ保存せず、起動プロセスの環境変数からのみ読み込む。
+R2_ENDPOINT = _get("DS_SHEET_R2_ENDPOINT", "").rstrip("/")
+R2_BUCKET = _get("DS_SHEET_R2_BUCKET", "")
+R2_ACCESS_KEY_ID = _get("DS_SHEET_R2_ACCESS_KEY_ID", "")
+R2_SECRET_ACCESS_KEY = _get("DS_SHEET_R2_SECRET_ACCESS_KEY", "")
+R2_URL_TTL_S = max(60, min(604800, int(_get("DS_SHEET_R2_URL_TTL_S", "86400"))))
+R2_SHARE_ENABLED = all((
+    R2_ENDPOINT,
+    R2_BUCKET,
+    R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY,
+))
