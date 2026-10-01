@@ -21,6 +21,7 @@ h1 { font-size: 18px; margin: 0; }
 h2 { font-size: 15px; margin: 0 0 12px; }
 h3 { font-size: 13px; margin: 16px 0 6px; color: var(--muted); }
 .field-help { margin: -2px 0 8px; color: var(--muted); font-size: 11px; }
+.generation-help { margin: -4px 0 2px; line-height: 1.45; }
 .health { font-size: 12px; color: var(--muted); }
 .health.ok { color: var(--ok); }
 .health.err { color: var(--err); }

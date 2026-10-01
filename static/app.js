@@ -46,6 +46,11 @@ async function init() {
   ).join("");
   $("partialTarget").value = META.defaults.partial_target;
   $("partialColor").value = META.defaults.partial_color;
+  $("generationMode").innerHTML = META.generation_modes.map((m) =>
+    `<option value="${m.key}" ${m.key === META.defaults.generation_mode ? "selected" : ""}>${m.label}</option>`
+  ).join("");
+  $("generationMode").addEventListener("change", updateGenerationModeHelp);
+  updateGenerationModeHelp();
   document.querySelectorAll('input[name="mode"], input[name="variant"]').forEach((el) =>
     el.addEventListener("change", updateModeSettings)
   );
@@ -213,6 +218,11 @@ function updateModeSettings() {
   $("sizeSection").hidden = mode === "mix";
 }
 
+function updateGenerationModeHelp() {
+  const selected = META.generation_modes.find((m) => m.key === $("generationMode").value);
+  $("generationModeHelp").textContent = selected?.help || "";
+}
+
 async function startJob() {
   const f = $("imageInput").files[0];
   if (!f) return;
@@ -251,6 +261,7 @@ async function startJob() {
   fd.append("partial_color", $("partialColor").value);
   fd.append("quant", $("quant").value);
   fd.append("layout", $("layout").value);
+  fd.append("generation_mode", $("generationMode").value);
 
   $("startBtn").disabled = true;
   try {
@@ -374,11 +385,19 @@ async function poll() {
     line.textContent = "1/4: 選択した表現に整えています…";
   } else if (job.status === "views") {
     const cs = job.charsheet;
+    const modeLabel = Object.fromEntries([
+      ...META.variants.map((v) => [v.key, v.label]),
+      ...META.modes.map((v) => [v.key, v.label]),
+    ])[cs?.mode] || "";
+    const viewLabel = Object.fromEntries(META.views.map((v) => [v.key, v.label]))[cs?.current_view] || "";
+    const detail = [modeLabel, viewLabel].filter(Boolean).join("・");
     line.textContent = cs && cs.total
-      ? `2/4: 多視点を生成中(${cs.progress}/${cs.total} 方向)…`
+      ? `2/4: 多視点を生成中(${cs.progress}/${cs.total} 方向${detail ? `・${detail}` : ""})…`
       : "2/4: 多視点生成を開始しています…";
   } else if (job.status === "finishing" || job.status === "variants") {
-    line.textContent = "3/4: 各ビューの仕上げを生成しています…";
+    const statuses = Object.values(job.views || {}).flatMap((variants) => Object.values(variants));
+    const completed = statuses.filter((status) => status === "done" || status === "error").length;
+    line.textContent = `3/4: 各ビューの仕上げを生成中(${completed}/${statuses.length} セル)…`;
   } else if (job.status === "composing") {
     line.textContent = "4/4: シートを合成しています…";
   } else if (job.status === "error") {

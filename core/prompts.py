@@ -87,11 +87,18 @@ MODE_PROMPTS = {
     "partial": STYLIZE_PROMPT,
 }
 
+FULL_BODY_MARGIN_SUFFIX = (
+    " The final composition shows exactly one complete character centered from the top "
+    "of the hair to the soles of both feet. Keep generous pure white margin above the "
+    "head, below the feet, and on both sides, with the entire silhouette inside the frame."
+)
 
-def build_mode_prompt(mode: str) -> str:
+
+def build_mode_prompt(mode: str, full_body_margin: bool = False) -> str:
     if mode not in MODE_PROMPTS:
         raise ValueError(f"未知の表現モードです: {mode}")
-    return MODE_PROMPTS[mode]
+    prompt = MODE_PROMPTS[mode]
+    return prompt + FULL_BODY_MARGIN_SUFFIX if full_body_margin else prompt
 
 
 SIZE_LABELS = [

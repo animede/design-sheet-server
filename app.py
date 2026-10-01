@@ -34,6 +34,31 @@ app = FastAPI(title="design-sheet-server")
 
 os.makedirs(config.OUTPUTS_DIR, exist_ok=True)
 
+GENERATION_MODES = (
+    {
+        "key": "demo",
+        "label": "デモ高速（多視点624px）",
+        "help": "全身用の安全余白を保ちつつ、VRAM転送を抑えた624px多視点＋512px仕上げで高速生成します。",
+        "size": 624,
+        "finish_size": 512,
+    },
+    {
+        "key": "quality",
+        "label": "品質優先（従来サイズ）",
+        "help": "細部を残したい場合。従来と同じ解像度で生成します。",
+        "size": None,
+        "finish_size": None,
+    },
+    {
+        "key": "fast",
+        "label": "速度優先（多視点768px）",
+        "help": "基準画は全身品質を保ち、安全余白付き768px多視点＋512px仕上げで高速生成します。",
+        "size": 768,
+        "finish_size": 512,
+    },
+)
+GENERATION_MODE_BY_KEY = {item["key"]: item for item in GENERATION_MODES}
+
 _SAFE_ID = re.compile(r"^[0-9a-f]{12}$")
 _SAFE_IMAGE = re.compile(r"^[a-z0-9_]+$")
 
@@ -93,11 +118,16 @@ async def meta():
         "variants": [{"key": k, "label": l} for k, l in VARIANT_LABELS],
         "modes": [{"key": k, "label": l} for k, l in MODE_LABELS],
         "sizes": [{"key": k, "label": l} for k, l in SIZE_LABELS],
+        "generation_modes": [
+            {k: v for k, v in item.items() if k not in ("size", "finish_size")}
+            for item in GENERATION_MODES
+        ],
         "defaults": {
             "partial_target": DEFAULT_PARTIAL_TARGET,
             "partial_color": DEFAULT_PARTIAL_COLOR,
-            "mode": "illustration",
-            "sizes": ["small", "medium", "large"],
+            "mode": "chibi",
+            "sizes": ["large"],
+            "generation_mode": "demo",
         },
         "image_server_url": config.IMAGE_SERVER_URL,
         "cloud_share": {
@@ -137,10 +167,17 @@ async def generate(
     hero_view: str = Form("front"),
     mode: str = Form(""),
     sizes: str = Form("small,medium,large"),
+    generation_mode: str = Form("quality"),
 ):
     if layout not in ("a4", "grid"):
         raise HTTPException(status_code=400, detail="layout は a4 / grid のいずれかを指定してください。")
     mode = mode.strip().lower()
+    generation_mode = generation_mode.strip().lower()
+    if generation_mode not in GENERATION_MODE_BY_KEY:
+        raise HTTPException(
+            status_code=400,
+            detail=f"generation_mode は {tuple(GENERATION_MODE_BY_KEY)} から選択してください。",
+        )
     mix = mode == "mix"
     if mix:
         mode = ""
@@ -206,6 +243,9 @@ async def generate(
         "mode": mode or None,
         "mix": mix,
         "sizes": size_list,
+        "generation_mode": generation_mode,
+        "generation_size": GENERATION_MODE_BY_KEY[generation_mode]["size"],
+        "finishing_size": GENERATION_MODE_BY_KEY[generation_mode]["finish_size"],
     }
     try:
         job_id = jobs.start_job(image_bytes, params)

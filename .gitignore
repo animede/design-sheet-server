@@ -1,9 +1,28 @@
 __pycache__/
 *.pyc
+
+# アプリが生成・保存する画像、ZIP、ジョブ情報
 outputs/
+
+# チラシ制作物（アプリ本体では使用しない）
+output/
+assets/
+tools/build_promo_flyer.py
+
+# ローカルの作業・検証用ファイル
+tmp/
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# ローカル開発環境・AI支援ツールの設定
 .claude/
+.codex/
+.agents/
 .env
 venv/
+
 # エディタの一時ファイル。.env を編集すると ..env.swp に中身が残るため必ず除外する
 *.swp
 *.swo

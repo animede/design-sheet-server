@@ -16,6 +16,20 @@ class ModePromptTests(unittest.TestCase):
 
         self.assertNotIn("two-and-a-half", prompt)
 
+    def test_fast_mode_prompt_keeps_complete_body_inside_frame(self):
+        prompt = build_mode_prompt("illustration", full_body_margin=True)
+
+        self.assertIn("top of the hair", prompt)
+        self.assertIn("soles of both feet", prompt)
+        self.assertIn("margin", prompt)
+
+    def test_quality_mode_prompt_remains_unchanged(self):
+        regular = build_mode_prompt("illustration")
+        fast = build_mode_prompt("illustration", full_body_margin=True)
+
+        self.assertNotIn("generous pure white margin", regular)
+        self.assertIn("generous pure white margin", fast)
+
 
 if __name__ == "__main__":
     unittest.main()

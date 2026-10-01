@@ -109,15 +109,81 @@ def _round32(v: int) -> int:
     return max(256, (int(v) // 32) * 32)
 
 
-def _edit_dims_for(img_bytes: bytes):
-    """EDIT_SIZE 指定時のみ明示解像度を返す(未指定はバックエンドの自動推定に任せる)。"""
-    if config.EDIT_SIZE <= 0:
+def _edit_dims_for(img_bytes: bytes, target_size: int = None):
+    """指定画素数相当の縦横比を維持した解像度を返す。
+
+    target_size が無い場合だけ従来どおり EDIT_SIZE を使い、どちらも未指定なら
+    バックエンドの自動推定に任せる。
+    """
+    size = target_size if target_size and target_size > 0 else config.EDIT_SIZE
+    if size <= 0:
         return None, None
     with Image.open(io.BytesIO(img_bytes)) as im:
         w, h = im.size
-    area = config.EDIT_SIZE * config.EDIT_SIZE
+    area = size * size
     scale = (area / (w * h)) ** 0.5
     return _round32(w * scale), _round32(h * scale)
+
+
+def _pad_charsheet_reference(img_bytes: bytes, margin_ratio: float = 0.15) -> bytes:
+    """多視点モデルの小解像度時のズームに備え、参照画像へ白い安全余白を足す。"""
+    with Image.open(io.BytesIO(img_bytes)) as im:
+        image = im.convert("RGB")
+    margin_x = max(1, round(image.width * margin_ratio))
+    margin_y = max(1, round(image.height * margin_ratio))
+    canvas = Image.new(
+        "RGB",
+        (image.width + margin_x * 2, image.height + margin_y * 2),
+        "white",
+    )
+    canvas.paste(image, (margin_x, margin_y))
+    buf = io.BytesIO()
+    canvas.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _charsheet_margin_ratio(generation_size: int | None) -> float:
+    """624px以下では真横ビューの足先を守るため、参照画をさらに引いて渡す。"""
+    return 0.30 if generation_size and generation_size <= 624 else 0.15
+
+
+def _sync_completed_charsheet_views(
+    job_id: str,
+    job_dir: str,
+    cs_job_id: str,
+    status: dict,
+    requested_views,
+    images: dict,
+    variant: str | None,
+    source_suffix: str,
+    mark_running: bool = False,
+):
+    """charsheetで完成した方向だけを取得し、UIから順次参照できる状態にする。"""
+    completed = {
+        item.get("key")
+        for item in (status.get("views") or [])
+        if item.get("status") == "done"
+    }
+    for view in requested_views:
+        if view in images or view not in completed:
+            continue
+        try:
+            image = client.charsheet_view_image(cs_job_id, view)
+        except client.ImageServerError:
+            # 完了通知と画像配信の間に短いずれがある場合は次回ポーリングで再試行する。
+            continue
+        images[view] = image
+        with open(os.path.join(job_dir, f"{view}_{source_suffix}.png"), "wb") as f:
+            f.write(image)
+        if not variant:
+            continue
+        if mark_running:
+            _set_cell(job_id, view, variant, "running")
+        else:
+            if source_suffix != variant:
+                with open(os.path.join(job_dir, f"{view}_{variant}.png"), "wb") as f:
+                    f.write(image)
+            _set_cell(job_id, view, variant, "done")
 
 
 def start_job(image_bytes: bytes, params: dict):
@@ -163,15 +229,22 @@ def _generate_mode_views(job_id: str, job_dir: str, params: dict, mode: str):
     seed = params["seed"]
     quant = params.get("quant") or config.DEFAULT_QUANT or None
     lightning = params.get("lightning", True)
+    generation_size = params.get("generation_size")
+    finishing_size = params.get("finishing_size", generation_size)
 
     with open(os.path.join(job_dir, "input.png"), "rb") as f:
         base_bytes = f.read()
 
     # 1. 選択した表現へ基準画像を正規化する。
     _update(job_id, status="styling")
+    # 512pxで最初のスタイル変換まで行うと、全身入力でも構図が胴体中心へ
+    # 寄ることがある。基準画だけは従来解像度を維持し、負荷の大きい8方向生成と
+    # 後段の仕上げに generation_size を適用する。
     w, h = _edit_dims_for(base_bytes)
     base_bytes = client.edit(
-        base_bytes, build_mode_prompt(mode), seed, width=w, height=h,
+        base_bytes,
+        build_mode_prompt(mode, full_body_margin=bool(generation_size)),
+        seed, width=w, height=h,
         quant=quant, lightning=lightning,
     )
     with open(os.path.join(job_dir, f"prepared_{mode}.png"), "wb") as f:
@@ -180,15 +253,35 @@ def _generate_mode_views(job_id: str, job_dir: str, params: dict, mode: str):
 
     # 2. 基準画像から多視点を生成する。
     _update(job_id, status="views")
-    cs_job_id = client.charsheet_generate(base_bytes, seed)
+    charsheet_input = base_bytes
+    if generation_size and generation_size <= 768:
+        charsheet_input = _pad_charsheet_reference(
+            base_bytes, margin_ratio=_charsheet_margin_ratio(generation_size)
+        )
+        with open(os.path.join(job_dir, f"charsheet_input_{mode}.png"), "wb") as f:
+            f.write(charsheet_input)
+    cs_job_id = client.charsheet_generate(
+        charsheet_input, seed, size=generation_size, views=views
+    )
+    sources = {}
 
     def on_progress(st):
+        current_view = next((
+            item.get("key") for item in (st.get("views") or [])
+            if item.get("status") == "running"
+        ), None)
         _update(job_id, charsheet={
             "job_id": cs_job_id,
             "status": st.get("status"),
             "progress": st.get("progress"),
             "total": st.get("total"),
+            "mode": mode,
+            "current_view": current_view,
         })
+        _sync_completed_charsheet_views(
+            job_id, job_dir, cs_job_id, st, views, sources, mode, "source",
+            mark_running=mode in ("lineart", "partial"),
+        )
 
     cs_status = client.charsheet_wait(cs_job_id, on_progress=on_progress)
     if cs_status.get("status") == "error":
@@ -196,13 +289,17 @@ def _generate_mode_views(job_id: str, job_dir: str, params: dict, mode: str):
             f"多視点生成(charsheet)が失敗しました: {cs_status.get('error')}"
         )
 
-    sources = {}
+    # 最終ステータスと画像配信にずれがあった場合も、ここで確実に回収する。
     for view in views:
+        if view in sources:
+            continue
         source = client.charsheet_view_image(cs_job_id, view)
         sources[view] = source
         with open(os.path.join(job_dir, f"{view}_source.png"), "wb") as f:
             f.write(source)
-        if mode not in ("lineart", "partial"):
+        if mode in ("lineart", "partial"):
+            _set_cell(job_id, view, mode, "running")
+        else:
             with open(os.path.join(job_dir, f"{view}_{mode}.png"), "wb") as f:
                 f.write(source)
             _set_cell(job_id, view, mode, "done")
@@ -216,7 +313,7 @@ def _generate_mode_views(job_id: str, job_dir: str, params: dict, mode: str):
         for view, source in sources.items():
             try:
                 _set_cell(job_id, view, mode, "running")
-                w, h = _edit_dims_for(source)
+                w, h = _edit_dims_for(source, finishing_size)
                 lineart = client.edit(
                     source, LINEART_PROMPT, seed, width=w, height=h,
                     quant=quant, lightning=lightning,
@@ -284,6 +381,8 @@ def _run_job(job_id: str):
     seed = params["seed"]
     quant = params.get("quant") or config.DEFAULT_QUANT or None
     lightning = params.get("lightning", True)
+    generation_size = params.get("generation_size")
+    finishing_size = params.get("finishing_size", generation_size)
 
     try:
         if params.get("mix"):
@@ -299,6 +398,7 @@ def _run_job(job_id: str):
         # --- 1. stylize(任意) ---
         if params.get("stylize", True):
             _update(job_id, status="stylizing")
+            # 基準画の構図を守るため、速度優先でも最初のスタイル変換は従来解像度。
             w, h = _edit_dims_for(base_bytes)
             base_bytes = client.edit(
                 base_bytes, STYLIZE_PROMPT, seed, width=w, height=h,
@@ -310,15 +410,35 @@ def _run_job(job_id: str):
 
         # --- 2. views(charsheet 8方向ジョブ。選択ビューのみ取得) ---
         _update(job_id, status="views")
-        cs_job_id = client.charsheet_generate(base_bytes, seed)
+        charsheet_input = base_bytes
+        if generation_size and generation_size <= 768:
+            charsheet_input = _pad_charsheet_reference(
+                base_bytes, margin_ratio=_charsheet_margin_ratio(generation_size)
+            )
+            with open(os.path.join(job_dir, "charsheet_input.png"), "wb") as f:
+                f.write(charsheet_input)
+        cs_job_id = client.charsheet_generate(
+            charsheet_input, seed, size=generation_size, views=views
+        )
+        color_images = {}
 
         def on_progress(st):
+            current_view = next((
+                item.get("key") for item in (st.get("views") or [])
+                if item.get("status") == "running"
+            ), None)
             _update(job_id, charsheet={
                 "job_id": cs_job_id,
                 "status": st.get("status"),
                 "progress": st.get("progress"),
                 "total": st.get("total"),
+                "mode": "color",
+                "current_view": current_view,
             })
+            _sync_completed_charsheet_views(
+                job_id, job_dir, cs_job_id, st, views, color_images,
+                "color" if "color" in variants else None, "color",
+            )
 
         cs_status = client.charsheet_wait(cs_job_id, on_progress=on_progress)
         if cs_status.get("status") == "error":
@@ -326,7 +446,10 @@ def _run_job(job_id: str):
                 f"多視点生成(charsheet)が失敗しました: {cs_status.get('error')}"
             )
         for v in views:
+            if v in color_images:
+                continue
             img = client.charsheet_view_image(cs_job_id, v)
+            color_images[v] = img
             with open(os.path.join(job_dir, f"{v}_color.png"), "wb") as f:
                 f.write(img)
             if "color" in variants:
@@ -340,7 +463,7 @@ def _run_job(job_id: str):
         for v in views:
             with open(os.path.join(job_dir, f"{v}_color.png"), "rb") as f:
                 color_bytes = f.read()
-            w, h = _edit_dims_for(color_bytes)
+            w, h = _edit_dims_for(color_bytes, finishing_size)
 
             lineart_bytes = None
             if "lineart" in variants or "partial" in variants:

@@ -104,13 +104,18 @@ def edit(
     return fetch_bytes(image_url)
 
 
-def charsheet_generate(image_bytes: bytes, seed: int) -> str:
+def charsheet_generate(image_bytes: bytes, seed: int, size: int = None, views=None) -> str:
     """多視点(8方向)ジョブを開始して job_id を返す。"""
+    data = {"seed": str(seed)}
+    if size:
+        data["size"] = str(int(size))
+    if views:
+        data["views"] = ",".join(views)
     files = {"image": ("input.png", io.BytesIO(image_bytes), "image/png")}
     resp = _post_with_busy_retry(
         config.IMAGE_SERVER_URL + "/api/charsheet/generate",
         files=files,
-        data={"seed": str(seed)},
+        data=data,
         timeout=60,
     )
     if resp.status_code != 200:
